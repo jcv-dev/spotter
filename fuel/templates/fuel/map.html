@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fuel Route Planner</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+  <style>
+    :root {
+      --ink: #1c2733;
+      --muted: #5b6b7b;
+      --accent: #1565c0;
+      --accent-soft: #e3f0fc;
+      --border: #d7dee5;
+      --card: rgba(255, 255, 255, 0.96);
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: var(--ink); }
+    #map { position: absolute; inset: 0; background: #eef2f5; }
+    .panel {
+      position: absolute; top: 16px; left: 16px; z-index: 1000;
+      width: 360px; max-height: calc(100% - 32px);
+      display: flex; flex-direction: column;
+      background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+      box-shadow: 0 8px 28px rgba(16, 42, 67, 0.18); overflow: hidden;
+      backdrop-filter: blur(4px);
+    }
+    .panel header { padding: 14px 16px 10px; border-bottom: 1px solid var(--border); }
+    .panel h1 { margin: 0 0 4px; font-size: 17px; letter-spacing: -0.01em; }
+    .panel .sub { color: var(--muted); font-size: 12.5px; }
+    form { padding: 12px 16px; border-bottom: 1px solid var(--border); display: grid; gap: 8px; }
+    form label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+    .row { display: grid; gap: 8px; grid-template-columns: 1fr 1fr; }
+    input[type=text] {
+      width: 100%; padding: 7px 9px; font-size: 13px; color: var(--ink);
+      border: 1px solid var(--border); border-radius: 7px; background: #fff;
+    }
+    input[type=text]:focus { outline: 2px solid var(--accent); outline-offset: 0; border-color: var(--accent); }
+    .checkbox { display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--ink); }
+    button {
+      padding: 8px 12px; border: 0; border-radius: 7px; background: var(--accent); color: #fff;
+      font-size: 13px; font-weight: 600; cursor: pointer;
+    }
+    button:hover { background: #0d4d99; }
+    .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--border); border-bottom: 1px solid var(--border); }
+    .stat { background: #fff; padding: 9px 12px; }
+    .stat .value { font-size: 15px; font-weight: 650; }
+    .stat .label { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+    .stops { overflow-y: auto; padding: 6px 8px 10px; }
+    .stops h2 { margin: 8px 8px 6px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+    .stop {
+      display: grid; grid-template-columns: 26px 1fr auto; gap: 8px; align-items: center;
+      padding: 8px; border-radius: 8px; cursor: pointer; font-size: 13px;
+    }
+    .stop:hover { background: var(--accent-soft); }
+    .stop .idx {
+      width: 24px; height: 24px; border-radius: 50%; background: var(--accent); color: #fff;
+      display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700;
+    }
+    .stop .where { color: var(--muted); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .stop .cost { text-align: right; font-weight: 650; }
+    .stop .cost small { display: block; color: var(--muted); font-weight: 400; }
+    .error { margin: 14px 16px; padding: 10px 12px; border-radius: 8px; background: #fdecea; border: 1px solid #f5c6c0; color: #8c2f26; font-size: 13px; }
+    .badge { display: inline-block; padding: 1px 6px; border-radius: 999px; background: #fff3e0; color: #b26a00; font-size: 10.5px; margin-left: 4px; }
+    .popup h3 { margin: 0 0 2px; font-size: 14px; }
+    .popup p { margin: 2px 0; font-size: 12.5px; color: #445; }
+    .popup .price { font-weight: 700; color: var(--accent); }
+    @media (max-width: 720px) {
+      .panel { left: 8px; right: 8px; top: 8px; width: auto; max-height: 58%; }
+    }
+  </style>
+</head>
+<body>
+<div id="map"></div>
+
+<div class="panel">
+  <header>
+    <h1>Fuel Route Planner</h1>
+    <div class="sub">Optimal refuelling stops within 10&nbsp;mi of the route &middot; 500&nbsp;mi range</div>
+  </header>
+
+  <form method="get" action="/map/">
+    <div>
+      <label for="start">Start</label>
+      <input type="text" id="start" name="start" value="{{ query_start }}" placeholder="Los Angeles, CA or 34.05,-118.24">
+    </div>
+    <div>
+      <label for="finish">Finish</label>
+      <input type="text" id="finish" name="finish" value="{{ query_finish }}" placeholder="New York, NY or 40.71,-74.00">
+    </div>
+    <label class="checkbox">
+      <input type="checkbox" name="start_full_tank" value="true" {% if start_full_tank %}checked{% endif %}>
+      Start with a full tank (50 gal)
+    </label>
+    <button type="submit">Plan route</button>
+  </form>
+
+  {% if map_error %}
+    <div class="error">
+      <strong>Could not build the route.</strong><br>{{ map_error.message }}
+      <div class="sub" style="margin-top:4px">code: {{ map_error.code }}</div>
+    </div>
+  {% else %}
+    <div class="stats">
+      <div class="stat"><div class="value">{{ payload.total_distance_miles }}</div><div class="label">Miles</div></div>
+      <div class="stat"><div class="value">${{ payload.total_fuel_cost }}</div><div class="label">Fuel cost</div></div>
+      <div class="stat"><div class="value">{{ payload.total_gallons_purchased }}</div><div class="label">Gallons</div></div>
+    </div>
+    <div class="stops" id="stops">
+      <h2>Fuel stops ({{ payload.fuel_stops|length }})</h2>
+      {% for stop in payload.fuel_stops %}
+        <div class="stop" data-index="{{ forloop.counter0 }}">
+          <div class="idx">{{ forloop.counter }}</div>
+          <div>
+            <div>{{ stop.name }}{% if stop.is_approximate %}<span class="badge">approx</span>{% endif %}</div>
+            <div class="where">{{ stop.city }}, {{ stop.state }} &middot; mile {{ stop.distance_from_start_miles }}{% if stop.detour_miles > 0.05 %} &middot; detour {{ stop.detour_miles }} mi{% endif %}</div>
+          </div>
+          <div class="cost">${{ stop.cost }}<small>{{ stop.gallons_purchased }} gal @ ${{ stop.price }}</small></div>
+        </div>
+      {% empty %}
+        <div class="stop" style="cursor:default">No fuel stops needed for this trip.</div>
+      {% endfor %}
+    </div>
+  {% endif %}
+</div>
+
+{{ payload|json_script:"route-data" }}
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script>
+(function () {
+  const map = L.map('map', { zoomControl: true, attributionControl: true });
+
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+  }).addTo(map);
+
+  map.setView([39.5, -98.35], 4);
+
+  const dataEl = document.getElementById('route-data');
+  const data = dataEl ? JSON.parse(dataEl.textContent) : null;
+  if (!data) { return; }
+
+  const latlngs = data.route.coordinates.map(c => [c[1], c[0]]);
+  const routeLine = L.polyline(latlngs, { color: '#1565c0', weight: 4, opacity: 0.85 }).addTo(map);
+
+  L.circleMarker([data.start.latitude, data.start.longitude], {
+    radius: 7, color: '#1b5e20', weight: 2, fillColor: '#43a047', fillOpacity: 1
+  }).addTo(map).bindPopup('<div class="popup"><h3>Start</h3><p>' + data.start.label + '</p></div>');
+
+  L.circleMarker([data.finish.latitude, data.finish.longitude], {
+    radius: 7, color: '#8e0000', weight: 2, fillColor: '#e53935', fillOpacity: 1
+  }).addTo(map).bindPopup('<div class="popup"><h3>Finish</h3><p>' + data.finish.label + '</p></div>');
+
+  function money(value) { return '$' + Number(value).toFixed(2); }
+
+  const markers = data.fuel_stops.map((stop, index) => {
+    const icon = L.divIcon({
+      className: '',
+      html: '<div style="width:26px;height:26px;border-radius:50%;background:#ef6c00;color:#fff;'
+          + 'display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;'
+          + 'border:2px solid #fff;box-shadow:0 1px 6px rgba(0,0,0,.35)">' + (index + 1) + '</div>',
+      iconSize: [26, 26], iconAnchor: [13, 13]
+    });
+    const popup = '<div class="popup">'
+      + '<h3>' + stop.name + (stop.is_approximate ? ' <span class="badge">approx</span>' : '') + '</h3>'
+      + '<p>' + stop.address + '</p>'
+      + '<p>' + stop.city + ', ' + stop.state + '</p>'
+      + '<p class="price">' + money(stop.price) + '/gal &rarr; ' + stop.gallons_purchased + ' gal = ' + money(stop.cost) + '</p>'
+      + '<p>Mile ' + stop.distance_from_start_miles
+      + (stop.detour_miles > 0.05 ? ' &middot; detour ' + stop.detour_miles + ' mi' : '')
+      + (stop.is_start_fuel ? ' &middot; start fuel' : '') + '</p>'
+      + '</div>';
+    return L.marker([stop.latitude, stop.longitude], { icon })
+      .addTo(map)
+      .bindPopup(popup);
+  });
+
+  document.querySelectorAll('.stop[data-index]').forEach(el => {
+    el.addEventListener('click', () => {
+      const marker = markers[Number(el.dataset.index)];
+      if (!marker) { return; }
+      map.flyTo(marker.getLatLng(), 11, { duration: 0.8 });
+      marker.openPopup();
+    });
+  });
+
+  const bounds = routeLine.getBounds().pad(0.08);
+  map.fitBounds(bounds);
+})();
+</script>
+</body>
+</html>
