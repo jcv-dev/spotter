@@ -132,7 +132,9 @@ def select_candidates(
 
         k = int(np.argmin(distances))
         distance_to_route = float(distances[k])
-        if distance_to_route > radius_miles:
+        detour_miles = 2.0 * distance_to_route
+        # Keep only stations whose (round-trip) detour fits the radius.
+        if detour_miles > radius_miles:
             continue
 
         segment = lo + k
@@ -151,7 +153,7 @@ def select_candidates(
                 price=float(station.price),
                 is_approximate=bool(getattr(station, "is_approximate", False)),
                 along_miles=along,
-                detour_miles=2.0 * distance_to_route,
+                detour_miles=detour_miles,
             )
         )
 

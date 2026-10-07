@@ -27,6 +27,7 @@ env = environ.Env(
     TANK_CAPACITY_GALLONS=(float, 50.0),
     MILES_PER_GALLON=(float, 10.0),
     FUEL_STATION_RADIUS_MILES=(float, 10.0),
+    FUEL_GRID_STEP_GALLONS=(float, 0.5),
 )
 # Read the local .env file if present (does not override real env vars).
 environ.Env.read_env(BASE_DIR / ".env")
@@ -144,6 +145,7 @@ REST_FRAMEWORK = {
 # Fuel route domain settings
 # ---------------------------------------------------------------------------
 ORS_BASE_URL = env("OPENROUTESERVICE_BASE_URL")
+OPENROUTESERVICE_API_KEY = env("OPENROUTESERVICE_API_KEY")
 ORS_TIMEOUT_SECONDS = env("ORS_TIMEOUT_SECONDS")
 ORS_REQUEST_INTERVAL = env("ORS_REQUEST_INTERVAL")
 ROUTE_CACHE_TTL = env("ROUTE_CACHE_TTL")
@@ -152,6 +154,7 @@ GEOCODE_CACHE_TTL = env("GEOCODE_CACHE_TTL")
 TANK_CAPACITY_GALLONS = env("TANK_CAPACITY_GALLONS")
 MILES_PER_GALLON = env("MILES_PER_GALLON")
 FUEL_STATION_RADIUS_MILES = env("FUEL_STATION_RADIUS_MILES")
+FUEL_GRID_STEP_GALLONS = env("FUEL_GRID_STEP_GALLONS")
 
 # The task requires both endpoints to be in the continental USA.
 USA_LAT_MIN = 24.0
