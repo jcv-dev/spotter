@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+
+# Django
+*.log
+db.sqlite3
+/staticfiles/
+/media/
+
+# Environment files (never commit secrets)
+.env
+.env.local
+.env.production
+
+# Local tooling
+.idea/
+.vscode/
+.DS_Store
+*.swp
+
+# Local artifacts
+/screenshots/

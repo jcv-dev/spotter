@@ -1,0 +1,35 @@
+services:
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: fuel_route
+      POSTGRES_USER: fuel
+      POSTGRES_PASSWORD: fuel
+    ports:
+      # Host port 55432 avoids clashing with a locally installed Postgres.
+      - "55432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fuel -d fuel_route"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  web:
+    build: .
+    command: sh -c "python manage.py migrate && python manage.py runserver 0.0.0.0:8000"
+    volumes:
+      - .:/app
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgres://fuel:fuel@db:5432/fuel_route
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
