@@ -19,7 +19,9 @@ env = environ.Env(
     DATABASE_URL=(str, "postgres://fuel:fuel@localhost:5432/fuel_route"),
     REDIS_URL=(str, ""),
     OPENROUTESERVICE_API_KEY=(str, ""),
-    OPENROUTESERVICE_BASE_URL=(str, "https://api.openrouteservice.org"),
+    # The old api.openrouteservice.org URL is deprecated (reduced quota);
+    # HeiGIT's current API is api.heigit.org.
+    OPENROUTESERVICE_BASE_URL=(str, "https://api.heigit.org"),
     ORS_TIMEOUT_SECONDS=(float, 20.0),
     ORS_REQUEST_INTERVAL=(float, 0.55),
     ROUTE_CACHE_TTL=(int, 3600),

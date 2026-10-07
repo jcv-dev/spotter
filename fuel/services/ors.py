@@ -2,8 +2,8 @@
 
 Two endpoints are used:
 
-* ``/geocode/search`` – address -> coordinates (geocoding).
-* ``/v2/directions/{profile}/geojson`` – coordinates -> route geometry.
+* ``/pelias/v1/search`` – address -> coordinates (geocoding).
+* ``/openrouteservice/v2/directions/{profile}/geojson`` – coordinates -> route geometry.
 
 Both are cached through Django's cache framework to keep external calls to a
 minimum (geocoding for 24h by default, routes for 1h).
@@ -172,7 +172,7 @@ def geocode(query: str, *, country: str = "US") -> GeocodeResult | None:
         "lang": "en",
     }
     logger.info("Geocoding %r", query)
-    data = _request("GET", f"{_base_url()}/geocode/search", params=params)
+    data = _request("GET", f"{_base_url()}/pelias/v1/search", params=params)
 
     result: GeocodeResult | None = None
     features = data.get("features") or []
@@ -220,7 +220,7 @@ def get_directions(
         "coordinates": [[start_lon, start_lat], [finish_lon, finish_lat]],
         "instructions": False,
     }
-    url = f"{_base_url()}/v2/directions/{profile}/geojson"
+    url = f"{_base_url()}/openrouteservice/v2/directions/{profile}/geojson"
     logger.info("Requesting ORS directions %s -> %s", start, finish)
     data = _request("POST", url, json_body=body, headers={"Authorization": api_key})
 
