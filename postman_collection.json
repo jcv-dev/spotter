@@ -35,6 +35,28 @@
       }
     },
     {
+      "name": "Route - coordinates (full tank)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"start\": {\"lat\": 34.0522, \"lon\": -118.2437},\n  \"finish\": {\"lat\": 40.7128, \"lon\": -74.0060},\n  \"start_full_tank\": true\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/route/",
+          "host": ["{{base_url}}"],
+          "path": ["api", "route", ""]
+        },
+        "description": "Same route as the address example but with lat/lon. Needs no geocoding, so it also works when the ORS geocoding quota is exhausted."
+      }
+    },
+    {
       "name": "Route - coordinates (empty tank)",
       "request": {
         "method": "POST",
