@@ -150,27 +150,58 @@ def _request(
     raise last_error or ORSRequestError("OpenRouteService request failed")
 
 
-def geocode(query: str, *, country: str = "US") -> GeocodeResult | None:
+def geocode(
+    query: str,
+    *,
+    country: str = "US",
+    rect: tuple[float, float, float, float] | None = None,
+    circle: tuple[float, float, float] | None = None,
+    focus: tuple[float, float] | None = None,
+) -> GeocodeResult | None:
     """Geocode a free-form address query. Returns ``None`` when nothing matches.
 
+    ``rect`` is ``(min_lat, min_lon, max_lat, max_lon)``, ``circle`` is
+    ``(lat, lon, radius_km)`` and ``focus`` is a ``(lat, lon)`` ranking bias.
     Results (including negative results) are cached to avoid repeated calls.
     """
     query = " ".join((query or "").split())
     if not query:
         return None
 
-    key = _cache_key("geocode", country.upper(), query.lower())
+    key_parts = [country.upper(), query.lower()]
+    if rect:
+        key_parts.append("rect:" + ",".join(f"{value:.4f}" for value in rect))
+    if circle:
+        key_parts.append("circle:" + ",".join(f"{value:.4f}" for value in circle))
+    if focus:
+        key_parts.append("focus:" + ",".join(f"{value:.4f}" for value in focus))
+    key = _cache_key("geocode", *key_parts)
     cached = cache.get(key, default=_MISSING)
     if cached is not _MISSING:
         return cached
 
-    params = {
+    params: dict = {
         "api_key": get_api_key(),
         "text": query,
         "size": 1,
         "boundary.country": country.upper(),
         "lang": "en",
     }
+    if rect:
+        min_lat, min_lon, max_lat, max_lon = rect
+        params["boundary.rect.min_lat"] = min_lat
+        params["boundary.rect.min_lon"] = min_lon
+        params["boundary.rect.max_lat"] = max_lat
+        params["boundary.rect.max_lon"] = max_lon
+    if circle:
+        lat, lon, radius_km = circle
+        params["boundary.circle.lat"] = lat
+        params["boundary.circle.lon"] = lon
+        params["boundary.circle.radius"] = radius_km
+    if focus:
+        params["focus.point.lat"] = focus[0]
+        params["focus.point.lon"] = focus[1]
+
     logger.info("Geocoding %r", query)
     data = _request("GET", f"{_base_url()}/pelias/v1/search", params=params)
 

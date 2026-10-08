@@ -23,7 +23,7 @@ from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
 from fuel.models import FuelStation
-from fuel.services import ors
+from fuel.services import geocoding, ors
 
 logger = logging.getLogger("fuel.import")
 
@@ -191,25 +191,11 @@ class Command(BaseCommand):
         return obj
 
     # ------------------------------------------------------------- geocode ---
-    def _geocode(self, station: dict, city_cache: dict) -> tuple[float, float, bool] | None:
-        query = f"{station['address']}, {station['city']}, {station['state']}"
-        result = ors.geocode(query)
-        if result is not None:
-            return result.latitude, result.longitude, False
-
-        city_key = f"{station['city'].lower()}|{station['state']}"
-        if city_key in city_cache:
-            cached = city_cache[city_key]
-            if cached is None:
-                return None
-            return cached[0], cached[1], True
-
-        result = ors.geocode(f"{station['city']}, {station['state']}")
-        if result is None:
-            city_cache[city_key] = None
+    def _geocode(self, station: dict) -> tuple[float, float, bool] | None:
+        outcome = geocoding.geocode_station(station["address"], station["city"], station["state"])
+        if outcome is None:
             return None
-        city_cache[city_key] = (result.latitude, result.longitude)
-        return result.latitude, result.longitude, True
+        return outcome.latitude, outcome.longitude, outcome.is_approximate
 
     # ---------------------------------------------------------------- main ---
     def handle(self, *args, **options):
@@ -244,7 +230,6 @@ class Command(BaseCommand):
             )
 
         counters = {"geocoded": 0, "approximate": 0, "cached": 0, "failed": 0, "updated": 0}
-        city_cache: dict = {}
         total = len(stations)
 
         for index, station in enumerate(stations, start=1):
@@ -262,7 +247,7 @@ class Command(BaseCommand):
                 counters["cached"] += 1
             else:
                 try:
-                    geo = self._geocode(station, city_cache)
+                    geo = self._geocode(station)
                 except ors.ORSQuotaError as exc:
                     self.stdout.write(self.style.ERROR(str(exc)))
                     raise CommandError(

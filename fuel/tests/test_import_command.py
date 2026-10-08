@@ -27,8 +27,17 @@ def write_csv(rows) -> str:
     return handle.name
 
 
-def fake_geocode(query, country="US"):
-    return GeocodeResult(33.0, -112.0, label=query)
+def fake_geocode(query, country="US", **kwargs):
+    """City queries resolve; the Gila Bend address resolves near its city;
+    the Loxley highway address fails (city fallback)."""
+    lowered = query.lower()
+    if lowered.startswith("gila bend"):
+        return GeocodeResult(32.95, -112.72, label=query)
+    if lowered.startswith("i-8"):
+        return GeocodeResult(32.95, -112.72, label=query)
+    if lowered.startswith("loxley"):
+        return GeocodeResult(30.62, -87.75, label=query)
+    return None
 
 
 @override_settings(OPENROUTESERVICE_API_KEY="test-key", ORS_REQUEST_INTERVAL=0.0)
@@ -62,12 +71,15 @@ class ImportCommandTests(TestCase):
             self.run_command()
 
         self.assertEqual(FuelStation.objects.count(), 2)
-        self.assertEqual(geocode.call_count, 2)
+        # Two calls per station: city centroid + address attempt.
+        self.assertEqual(geocode.call_count, 4)
         station = FuelStation.objects.get(city="Gila Bend")
         self.assertEqual(station.price, Decimal("3.100"))
         self.assertEqual(station.truckstop_id, 20)
         self.assertFalse(station.is_approximate)
-        self.assertAlmostEqual(station.latitude, 33.0)
+        self.assertAlmostEqual(station.latitude, 32.95)
+        self.assertAlmostEqual(station.longitude, -112.72)
+        self.assertTrue(FuelStation.objects.get(city="Loxley").is_approximate)
 
     def test_import_is_idempotent_and_resumable(self):
         with mock.patch(
@@ -85,18 +97,19 @@ class ImportCommandTests(TestCase):
         self.assertEqual(FuelStation.objects.count(), 2)
 
     def test_city_fallback_marks_station_approximate(self):
-        def fake(query, country="US"):
-            # Highway-exit addresses fail; city/state queries succeed.
-            return None if "exit" in query.lower() else GeocodeResult(33.25, -87.5, label=query)
+        def fake(query, country="US", **kwargs):
+            # The highway-exit address fails; the city query succeeds.
+            return None if "exit" in query.lower() else GeocodeResult(30.62, -87.75, label=query)
 
         with mock.patch(
             "fuel.management.commands.import_fuel_prices.ors.geocode", side_effect=fake
         ) as geocode:
             self.run_command(limit=1)
+        # City centroid + failed address attempt.
         self.assertEqual(geocode.call_count, 2)
         station = FuelStation.objects.get()
         self.assertTrue(station.is_approximate)
-        self.assertAlmostEqual(station.longitude, -87.5)
+        self.assertAlmostEqual(station.longitude, -87.75)
 
     def test_unresolvable_station_is_skipped(self):
         with mock.patch(
