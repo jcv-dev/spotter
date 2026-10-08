@@ -34,6 +34,7 @@ env = environ.Env(
     ROUTE_CACHE_TTL=(int, 3600),
     GEOCODE_CACHE_TTL=(int, 86400),
     GEOCODE_CITY_MAX_DISTANCE_MILES=(float, 15.0),
+    RATE_LIMIT_REQUESTS_PER_MINUTE=(int, 60),
     TANK_CAPACITY_GALLONS=(float, 50.0),
     MILES_PER_GALLON=(float, 10.0),
     FUEL_STATION_RADIUS_MILES=(float, 10.0),
@@ -64,6 +65,7 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "fuel.middleware.ResponseTimeMiddleware",
+    "fuel.middleware.RateLimitMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -168,6 +170,7 @@ ORS_REQUEST_INTERVAL = env("ORS_REQUEST_INTERVAL")
 ROUTE_CACHE_TTL = env("ROUTE_CACHE_TTL")
 GEOCODE_CACHE_TTL = env("GEOCODE_CACHE_TTL")
 GEOCODE_CITY_MAX_DISTANCE_MILES = env("GEOCODE_CITY_MAX_DISTANCE_MILES")
+RATE_LIMIT_REQUESTS_PER_MINUTE = env("RATE_LIMIT_REQUESTS_PER_MINUTE")
 
 TANK_CAPACITY_GALLONS = env("TANK_CAPACITY_GALLONS")
 MILES_PER_GALLON = env("MILES_PER_GALLON")

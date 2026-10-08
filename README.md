@@ -27,6 +27,7 @@ money spent on fuel. A Leaflet map page renders the same result.
 * Every response reports its server-side processing time (`X-Response-Time-Ms`
   and `Server-Timing` headers; the route API also returns `response_time_ms`
   in the JSON and the map panel displays it).
+* Rate limited to 60 requests/minute per IP on `/api/` and `/map/`.
 * Start and finish accept **addresses or `lat`/`lon` pairs**; both are
   validated to be inside the continental USA (lat 24–49, lon -125–-66).
 * `start_full_tank` parameter (default `true`): with a full tank the initial
@@ -278,6 +279,21 @@ twice.
 
 Returns `{"status": "ok", "database": true}`.
 
+### Rate limiting
+
+`/api/` and `/map/` are limited to **60 requests per minute per client IP**
+(`RATE_LIMIT_REQUESTS_PER_MINUTE`, set `0` to disable). Requests over the
+limit get HTTP **429** with:
+
+```json
+{"error": "Rate limit exceeded: 60 requests per minute.", "code": "rate_limited", "retry_after_seconds": 12}
+```
+
+plus `Retry-After`, `X-RateLimit-Limit`, `X-RateLimit-Remaining` and
+`X-RateLimit-Reset` headers (the headers are also present on successful
+responses). Behind a proxy the first `X-Forwarded-For` entry identifies the
+client; `/health/` and the admin are exempt.
+
 ---
 
 ## Fuel optimisation algorithm
@@ -406,48 +422,70 @@ database) and never call the external API.
 
 The `Dockerfile` builds a production image: Python 3.12-slim, gunicorn on
 port 8000, `entrypoint.sh` waits for Postgres, runs `migrate` and
-`collectstatic`, then starts gunicorn. A `/health/` healthcheck is included.
+`collectstatic`, then starts gunicorn. `/health/` is used as the healthcheck.
 
-On [Dokploy](https://dokploy.com/):
+### 1. PostgreSQL – required
 
-1. Create a new application from your Git repository and choose the
-   **Dockerfile** build type (Dockerfile path: `Dockerfile`).
-2. Add a PostgreSQL database (or use an external one) and set:
-   * `DATABASE_URL` – e.g. `postgres://user:pass@host:5432/fuel_route`
-   * `SECRET_KEY` – long random string
-   * `DEBUG=false`
-   * `ALLOWED_HOSTS` – your domain(s), comma separated
-   * `CSRF_TRUSTED_ORIGINS` – e.g. `https://your-domain`
-   * `OPENROUTESERVICE_API_KEY` – your key
-   * optionally `REDIS_URL`, `ROUTE_CACHE_TTL`, `GEOCODE_CACHE_TTL`
-3. Expose container port **8000** (Dokploy maps your domain to it).
-4. Deploy. Then load the pre-geocoded station fixture once (Dokploy terminal or
-   `docker exec`):
+Yes, the app needs a database. On Dokploy either:
+
+* **Create a database service**: project → *Create Database* → PostgreSQL,
+  then copy the connection URL it shows, or
+* **Use an external/managed Postgres** (Neon, Supabase, RDS, …).
+
+Set `DATABASE_URL=postgres://user:password@host:5432/dbname` in the app's
+environment variables. When both run in the same Dokploy project, use the
+internal hostname from the database dashboard.
+
+### 2. Redis – optional
+
+**Not required.** Without `REDIS_URL` the app uses Django's local-memory cache:
+
+* geocoding/route caches live per gunicorn worker and reset on redeploy
+  (harmless – the next requests simply call the provider again),
+* the 60 req/min rate limit is enforced per worker rather than globally.
+
+For shared caches and an exact cross-worker rate limit, create a Redis service
+in Dokploy and set `REDIS_URL=redis://...`.
+
+### 3. Application
+
+1. Create an application from your Git repository, build type **Dockerfile**
+   (path `Dockerfile`), and expose container port **8000**.
+2. Set the environment variables:
+
+   | Variable | Value |
+   | -------- | ----- |
+   | `DATABASE_URL` | from step 1 |
+   | `SECRET_KEY` | long random string |
+   | `DEBUG` | `false` |
+   | `ALLOWED_HOSTS` | your domain(s), comma separated |
+   | `CSRF_TRUSTED_ORIGINS` | `https://your-domain` |
+   | `OPENROUTESERVICE_API_KEY` | your HeiGIT key (needed for ORS routing/geocoding) |
+   | `ROUTING_PROVIDER` / `GEOCODING_PROVIDER` | optional: `ors` (default), `osrm`/`nominatim`, or `auto` |
+   | `REDIS_URL` | optional (step 2) |
+
+3. Deploy – migrations and static files run automatically in the entrypoint.
+4. Load the stations once (Dokploy terminal or `docker exec`):
 
    ```bash
    python manage.py loaddata fuel_stations
    ```
 
    The fixture ships with the repository (`fuel/fixtures/fuel_stations.json`,
-   generated from this project's own import run), so production **never calls
-   the geocoder** for those stations and your ORS quota stays untouched. After
-   that, `python manage.py import_fuel_prices` only processes states that are
-   not covered yet (existing stations are skipped – no quota spent).
-
-   To import everything from scratch instead (uses your geocoding quota,
-   ~2–3 daily windows):
+   **6,625 stations covering the whole USA**) so production never geocodes
+   anything and your ORS quota stays untouched.
+5. Optional, later: refine the city-level stations to address level:
 
    ```bash
-   python manage.py import_fuel_prices
+   python manage.py upgrade_approximate_stations   # ORS quota, resumable
    ```
 
 Notes:
 
-* The image does not include a Redis server; either point `REDIS_URL` at a
-  managed Redis or keep the local-memory cache (fine for a single worker).
-* The CSV is part of the image, so the import works out of the box.
+* The CSV is part of the image, so `import_fuel_prices` works out of the box
+  (it is not needed after `loaddata` – only 1 station is not in the fixture).
 * `api.heigit.org` is the current ORS API host; `api.openrouteservice.org` is
-  deprecated and rate-limited.
+  deprecated and heavily rate-limited.
 
 ---
 
