@@ -362,6 +362,14 @@ upstream failures), logging a single warning. This is handy for demos: with
 `GEOCODING_PROVIDER=auto`, address inputs keep working even after the ORS
 geocoding quota is used up.
 
+The fallback is **sticky for a cooldown window**
+(`MAPS_FALLBACK_COOLDOWN_SECONDS`, default 10 min, shared through the cache):
+once ORS fails, subsequent requests go straight to the free provider instead
+of paying for a failing ORS call every time (a spent quota used to add
+~0.7 s to every geocoded request). Transient upstream errors use a shorter,
+60 s cooldown. When the cooldown expires ORS is probed again, so the
+deployment recovers automatically after the quota resets.
+
 ```bash
 # .env – keyless routing + geocoding
 ROUTING_PROVIDER=osrm
@@ -428,7 +436,7 @@ The default cache backend is Django's local-memory cache. In production set
 ## Tests
 
 ```bash
-python manage.py test            # all 108 tests
+python manage.py test            # all 113 tests
 python manage.py test fuel.tests.test_optimizer
 ```
 

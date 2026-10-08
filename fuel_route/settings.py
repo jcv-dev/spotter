@@ -29,6 +29,9 @@ env = environ.Env(
     NOMINATIM_BASE_URL=(str, "https://nominatim.openstreetmap.org"),
     NOMINATIM_REQUEST_INTERVAL=(float, 1.1),
     MAPS_USER_AGENT=(str, "fuel-route-planner/1.0 (assessment demo)"),
+    # How long the auto provider sticks to the free fallback after ORS fails
+    # (transient failures back off for at most 60 s of it).
+    MAPS_FALLBACK_COOLDOWN_SECONDS=(int, 600),
     ORS_TIMEOUT_SECONDS=(float, 20.0),
     ORS_REQUEST_INTERVAL=(float, 0.55),
     ROUTE_CACHE_TTL=(int, 3600),
@@ -173,6 +176,7 @@ OSRM_BASE_URL = env("OSRM_BASE_URL")
 NOMINATIM_BASE_URL = env("NOMINATIM_BASE_URL")
 NOMINATIM_REQUEST_INTERVAL = env("NOMINATIM_REQUEST_INTERVAL")
 MAPS_USER_AGENT = env("MAPS_USER_AGENT")
+MAPS_FALLBACK_COOLDOWN_SECONDS = env("MAPS_FALLBACK_COOLDOWN_SECONDS")
 ORS_TIMEOUT_SECONDS = env("ORS_TIMEOUT_SECONDS")
 ORS_REQUEST_INTERVAL = env("ORS_REQUEST_INTERVAL")
 ROUTE_CACHE_TTL = env("ROUTE_CACHE_TTL")
