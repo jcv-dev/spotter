@@ -46,14 +46,14 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"start\": {\"lat\": 34.0522, \"lon\": -118.2437},\n  \"finish\": {\"lat\": 40.7128, \"lon\": -74.0060},\n  \"start_full_tank\": false\n}"
+          "raw": "{\n  \"start\": {\"lat\": 36.1699, \"lon\": -115.1398},\n  \"finish\": {\"lat\": 40.7128, \"lon\": -74.0060},\n  \"start_full_tank\": false\n}"
         },
         "url": {
           "raw": "{{base_url}}/api/route/",
           "host": ["{{base_url}}"],
           "path": ["api", "route", ""]
         },
-        "description": "Plan a route from coordinates starting with an empty tank. The first fuel stop is at/near the start."
+        "description": "Plan a route from Las Vegas starting with an empty tank. The first fuel stop is at/near the start (is_start_fuel=true). Los Angeles is not suitable here because the dataset has no station within 10 miles of it."
       }
     },
     {
@@ -115,6 +115,23 @@
           ]
         },
         "description": "Open in a browser: Leaflet map with the route and fuel stops. Reuses the API cache."
+      }
+    },
+    {
+      "name": "Map - empty tank (Las Vegas)",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{base_url}}/map/?start=Las+Vegas,+NV&finish=New+York,+NY&start_full_tank=false",
+          "host": ["{{base_url}}"],
+          "path": ["map", ""],
+          "query": [
+            {"key": "start", "value": "Las Vegas, NV"},
+            {"key": "finish", "value": "New York, NY"},
+            {"key": "start_full_tank", "value": "false"}
+          ]
+        },
+        "description": "Open in a browser: empty-tank start; the first marker is the start fuel station."
       }
     },
     {

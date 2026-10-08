@@ -18,8 +18,11 @@ money spent on fuel. A Leaflet map page renders the same result.
 ## Features
 
 * `POST /api/route/` – route + optimal fuel stops + total fuel cost (JSON).
-* `GET /map/` – Leaflet map (OpenStreetMap tiles) of the same route/stops,
-  reusing the service layer and caches (no extra external API calls).
+* `GET /map/` – Leaflet map of the same route/stops (OpenStreetMap tiles
+  served by the FOSSGIS mirror `tile.openstreetmap.de`, since the main
+  volunteer server blocks embedded clients; swap the URL in
+  `fuel/templates/fuel/map.html` for any other OSM provider), reusing the
+  service layer and caches (no extra external API calls).
 * `GET /health/` – liveness/readiness probe for Docker/Dokploy.
 * Start and finish accept **addresses or `lat`/`lon` pairs**; both are
   validated to be inside the continental USA (lat 24–49, lon -125–-66).
@@ -120,6 +123,24 @@ python manage.py import_fuel_prices --delay 1.0          # slower, safer
 python manage.py import_fuel_prices --dry-run            # parse only
 python manage.py import_fuel_prices --force              # re-geocode everything
 ```
+
+### Validating stored coordinates
+
+Highway-exit addresses can match the named highway in a different city or
+state, so the importer constrains every query to the station's state bounding
+box and only trusts an address result when it is within
+`GEOCODE_CITY_MAX_DISTANCE_MILES` (default 15 mi) of the city centroid;
+everything else falls back to the centroid with `is_approximate=true`.
+
+To audit and repair an existing database:
+
+```bash
+python manage.py validate_stations                    # report suspicious rows
+python manage.py validate_stations --full             # also check distance to the city centroid
+python manage.py validate_stations --fix --city-only  # repair (quota-friendly)
+```
+
+The command is resumable and skips stations that already pass validation.
 
 ### Quota notes (important)
 
