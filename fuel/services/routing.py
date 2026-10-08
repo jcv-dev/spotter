@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import math
 import re
+import time
 from dataclasses import dataclass
 from urllib.parse import urlencode
 
@@ -173,6 +174,7 @@ def _serialize_stop(stop) -> dict:
 
 def build_route_response(start_spec: dict, finish_spec: dict, start_full_tank: bool = True) -> dict:
     """Full pipeline: resolve -> route -> candidates -> optimal fuel plan."""
+    started = time.perf_counter()
     start = resolve_location(start_spec)
     finish = resolve_location(finish_spec)
     logger.info(
@@ -233,4 +235,5 @@ def build_route_response(start_spec: dict, finish_spec: dict, start_full_tank: b
         },
         "start_full_tank": bool(start_full_tank),
         "map_url": _map_url(start_spec, finish_spec, start_full_tank),
+        "response_time_ms": round((time.perf_counter() - started) * 1000.0, 1),
     }

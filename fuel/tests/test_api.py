@@ -133,6 +133,9 @@ class RouteAPITests(TestCase):
         self.assertGreater(payload["total_fuel_cost"], 0)
         self.assertTrue(payload["map_url"].startswith("/map/?"))
         self.assertIn("start=Los+Angeles", payload["map_url"])
+        # Server-side computation time is reported in the body.
+        self.assertIn("response_time_ms", payload)
+        self.assertGreaterEqual(payload["response_time_ms"], 0)
 
     def test_route_with_coordinates(self):
         self.mock_ors()
@@ -329,6 +332,7 @@ class MapViewTests(TestCase):
         self.assertIn("route-data", content)
         self.assertIn("Station 0.17", content)
         self.assertIn("Fuel stops", content)
+        self.assertIn("computed in", content)
         # Hidden field so an unchecked box still submits start_full_tank=false.
         self.assertIn('name="start_full_tank" value="false"', content)
 
@@ -363,3 +367,9 @@ class MapViewTests(TestCase):
         response = self.client.get("/health/")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["status"], "ok")
+
+    def test_response_time_headers_are_present(self):
+        response = self.client.get("/health/")
+        self.assertIn("X-Response-Time-Ms", response.headers)
+        self.assertGreaterEqual(float(response.headers["X-Response-Time-Ms"]), 0)
+        self.assertTrue(response.headers["Server-Timing"].startswith("app;dur="))

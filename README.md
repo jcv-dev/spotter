@@ -24,6 +24,9 @@ money spent on fuel. A Leaflet map page renders the same result.
   `fuel/templates/fuel/map.html` for any other OSM provider), reusing the
   service layer and caches (no extra external API calls).
 * `GET /health/` – liveness/readiness probe for Docker/Dokploy.
+* Every response reports its server-side processing time (`X-Response-Time-Ms`
+  and `Server-Timing` headers; the route API also returns `response_time_ms`
+  in the JSON and the map panel displays it).
 * Start and finish accept **addresses or `lat`/`lon` pairs**; both are
   validated to be inside the continental USA (lat 24–49, lon -125–-66).
 * `start_full_tank` parameter (default `true`): with a full tank the initial
@@ -237,9 +240,16 @@ Response (abridged):
   "start": {"label": "Los Angeles, CA, USA", "latitude": 34.05, "longitude": -118.24},
   "finish": {"label": "New York, NY, USA", "latitude": 40.71, "longitude": -74.0},
   "start_full_tank": true,
-  "map_url": "/map/?start=Los+Angeles%2C+CA&finish=New+York%2C+NY&start_full_tank=true"
+  "map_url": "/map/?start=Los+Angeles%2C+CA&finish=New+York%2C+NY&start_full_tank=true",
+  "response_time_ms": 2315.7
 }
 ```
+
+`response_time_ms` is the server-side plan computation time (geocoding/route
+cache hits make it drop sharply – e.g. ~2300 ms cold vs ~430 ms cached in a
+live run). Every response additionally carries the total request time as the
+`X-Response-Time-Ms` and standard `Server-Timing: app;dur=...` headers, and
+the map page shows the computation time in its panel.
 
 Status codes:
 

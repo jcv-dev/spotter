@@ -78,7 +78,7 @@
 <div class="panel">
   <header>
     <h1>Fuel Route Planner</h1>
-    <div class="sub">Optimal refuelling stops within 10&nbsp;mi of the route &middot; 500&nbsp;mi range</div>
+    <div class="sub">Optimal refuelling stops within 10&nbsp;mi of the route &middot; 500&nbsp;mi range{% if payload %} &middot; computed in {{ payload.response_time_ms }}&nbsp;ms{% endif %}</div>
   </header>
 
   <form method="get" action="/map/">
