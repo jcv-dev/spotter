@@ -17,7 +17,7 @@ from dataclasses import dataclass
 
 from django.conf import settings
 
-from . import ors
+from . import maps
 from .geo import haversine_miles
 from .us_states import bounding_box, point_in_state
 
@@ -40,7 +40,7 @@ def city_centroid(city: str, state: str) -> tuple[float, float] | None:
     box = bounding_box(state)
     if box is None:
         return None
-    result = ors.geocode(f"{city}, {state}", rect=box)
+    result = maps.geocode(f"{city}, {state}", rect=box)
     if result is None:
         return None
     if not point_in_state(result.latitude, result.longitude, state, margin_degrees=_STATE_MARGIN_DEGREES):
@@ -71,7 +71,7 @@ def geocode_station(
         return None
 
     if not city_only:
-        result = ors.geocode(
+        result = maps.geocode(
             f"{address}, {city}, {state}",
             rect=bounding_box(state),
             focus=centroid,

@@ -18,7 +18,8 @@ from django.conf import settings
 
 from fuel.models import FuelStation
 
-from . import ors
+from . import maps
+from .errors import ProviderConfigurationError, ProviderError
 from .geo import MILES_PER_DEGREE_LAT, simplify_polyline
 from .optimizer import (
     NoFeasiblePlanError,
@@ -81,10 +82,10 @@ def resolve_location(spec: dict) -> Location:
     address = (spec.get("address") or "").strip()
     if address:
         try:
-            result = ors.geocode(address)
-        except ors.ORSConfigurationError as exc:
+            result = maps.geocode(address)
+        except ProviderConfigurationError as exc:
             raise ORSNotConfiguredError(str(exc)) from exc
-        except ors.ORSError as exc:
+        except ProviderError as exc:
             raise RouteUnavailableError(f"Geocoding failed: {exc}") from exc
         if result is None:
             raise LocationValidationError(f"Could not geocode address {address!r}.")
@@ -179,12 +180,12 @@ def build_route_response(start_spec: dict, finish_spec: dict, start_full_tank: b
     )
 
     try:
-        directions = ors.get_directions(
+        directions = maps.get_directions(
             (start.latitude, start.longitude), (finish.latitude, finish.longitude)
         )
-    except ors.ORSConfigurationError as exc:
+    except ProviderConfigurationError as exc:
         raise ORSNotConfiguredError(str(exc)) from exc
-    except ors.ORSError as exc:
+    except ProviderError as exc:
         raise RouteUnavailableError(f"Could not compute the route: {exc}") from exc
 
     # Simplify slightly (<= ~8 m deviation) to keep responses/caches small

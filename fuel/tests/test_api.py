@@ -36,7 +36,7 @@ def point_at(coords, fraction):
     return float(latitude), float(longitude)
 
 
-@override_settings(ORS_REQUEST_INTERVAL=0.0)
+@override_settings(ORS_REQUEST_INTERVAL=0.0, ROUTING_PROVIDER="ors", GEOCODING_PROVIDER="ors")
 class RouteAPITests(TestCase):
     def setUp(self):
         cache.clear()
@@ -285,7 +285,7 @@ class RouteAPITests(TestCase):
         self.assertEqual(response.json()["code"], "route_unavailable")
 
 
-@override_settings(ORS_REQUEST_INTERVAL=0.0)
+@override_settings(ORS_REQUEST_INTERVAL=0.0, ROUTING_PROVIDER="ors", GEOCODING_PROVIDER="ors")
 class MapViewTests(TestCase):
     def setUp(self):
         cache.clear()

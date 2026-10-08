@@ -20,26 +20,23 @@ import requests
 from django.conf import settings
 from django.core.cache import cache
 
+from .errors import (
+    ProviderConfigurationError,
+    ProviderError,
+    ProviderQuotaError,
+    ProviderRequestError,
+)
+
 logger = logging.getLogger("fuel.ors")
 
 METERS_PER_MILE = 1609.344
 _MISSING = object()
 
-
-class ORSError(Exception):
-    """Base class for ORS related failures."""
-
-
-class ORSConfigurationError(ORSError):
-    """The API key is missing or rejected by ORS."""
-
-
-class ORSQuotaError(ORSError):
-    """The daily ORS quota has been exhausted."""
-
-
-class ORSRequestError(ORSError):
-    """ORS could not be reached or returned an unexpected response."""
+#: Historical ORS-specific names, kept as aliases of the shared error types.
+ORSError = ProviderError
+ORSConfigurationError = ProviderConfigurationError
+ORSQuotaError = ProviderQuotaError
+ORSRequestError = ProviderRequestError
 
 
 @dataclass(frozen=True)

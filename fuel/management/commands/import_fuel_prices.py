@@ -81,6 +81,14 @@ class Command(BaseCommand):
             help="Also import stations outside the USA (skipped by default; routes only accept US endpoints).",
         )
         parser.add_argument(
+            "--allow-public-nominatim",
+            action="store_true",
+            help=(
+                "Allow bulk geocoding through the public Nominatim service (it does not "
+                "permit bulk use – prefer ORS or a self-hosted instance)."
+            ),
+        )
+        parser.add_argument(
             "--dry-run",
             action="store_true",
             help="Parse and deduplicate only; do not call ORS or touch the database.",
@@ -222,6 +230,20 @@ class Command(BaseCommand):
                 )
             self.stdout.write(self.style.SUCCESS(f"Dry run: {len(stations)} stations would be imported."))
             return
+
+        # Bulk imports use ORS (the assessment's geocoder) regardless of the
+        # GEOCODING_PROVIDER used by the API: the public Nominatim service does
+        # not permit bulk geocoding, so that path requires an explicit opt-in.
+        configured_provider = (settings.GEOCODING_PROVIDER or "ors").lower()
+        if not options["allow_public_nominatim"]:
+            settings.GEOCODING_PROVIDER = "ors"
+            if configured_provider != "ors":
+                self.stdout.write(
+                    self.style.WARNING(
+                        f"Bulk imports always use ORS (configured provider: {configured_provider}). "
+                        "Pass --allow-public-nominatim to use the public Nominatim service instead."
+                    )
+                )
 
         if not settings.OPENROUTESERVICE_API_KEY:
             raise CommandError(

@@ -22,6 +22,13 @@ env = environ.Env(
     # The old api.openrouteservice.org URL is deprecated (reduced quota);
     # HeiGIT's current API is api.heigit.org.
     OPENROUTESERVICE_BASE_URL=(str, "https://api.heigit.org"),
+    # Map providers: ors (default) | osrm/nominatim (free, keyless) | auto.
+    ROUTING_PROVIDER=(str, "ors"),
+    GEOCODING_PROVIDER=(str, "ors"),
+    OSRM_BASE_URL=(str, "https://router.project-osrm.org"),
+    NOMINATIM_BASE_URL=(str, "https://nominatim.openstreetmap.org"),
+    NOMINATIM_REQUEST_INTERVAL=(float, 1.1),
+    MAPS_USER_AGENT=(str, "fuel-route-planner/1.0 (assessment demo)"),
     ORS_TIMEOUT_SECONDS=(float, 20.0),
     ORS_REQUEST_INTERVAL=(float, 0.55),
     ROUTE_CACHE_TTL=(int, 3600),
@@ -149,6 +156,12 @@ REST_FRAMEWORK = {
 # ---------------------------------------------------------------------------
 ORS_BASE_URL = env("OPENROUTESERVICE_BASE_URL")
 OPENROUTESERVICE_API_KEY = env("OPENROUTESERVICE_API_KEY")
+ROUTING_PROVIDER = env("ROUTING_PROVIDER")
+GEOCODING_PROVIDER = env("GEOCODING_PROVIDER")
+OSRM_BASE_URL = env("OSRM_BASE_URL")
+NOMINATIM_BASE_URL = env("NOMINATIM_BASE_URL")
+NOMINATIM_REQUEST_INTERVAL = env("NOMINATIM_REQUEST_INTERVAL")
+MAPS_USER_AGENT = env("MAPS_USER_AGENT")
 ORS_TIMEOUT_SECONDS = env("ORS_TIMEOUT_SECONDS")
 ORS_REQUEST_INTERVAL = env("ORS_REQUEST_INTERVAL")
 ROUTE_CACHE_TTL = env("ROUTE_CACHE_TTL")

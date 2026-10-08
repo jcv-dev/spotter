@@ -141,3 +141,21 @@ class ImportCommandTests(TestCase):
 
         with self.assertRaises(CommandError):
             call_command("import_fuel_prices", csv="/nonexistent/file.csv", stdout=StringIO())
+
+    @override_settings(GEOCODING_PROVIDER="nominatim")
+    def test_bulk_import_uses_ors_by_default(self):
+        with mock.patch(
+            "fuel.management.commands.import_fuel_prices.ors.geocode", side_effect=fake_geocode
+        ) as geocode:
+            output = self.run_command(limit=1)
+        self.assertIn("Bulk imports always use ORS", output)
+        self.assertTrue(geocode.called)
+
+    @override_settings(GEOCODING_PROVIDER="nominatim")
+    def test_bulk_import_can_opt_into_public_nominatim(self):
+        with mock.patch(
+            "fuel.services.nominatim.geocode",
+            return_value=GeocodeResult(30.62, -87.75, label="Loxley, AL"),
+        ) as geocode:
+            self.run_command(limit=1, allow_public_nominatim=True)
+        self.assertTrue(geocode.called)

@@ -16,7 +16,7 @@ from fuel.services.ors import GeocodeResult
 from fuel.services.us_states import bounding_box, point_in_state
 
 
-@override_settings(ORS_REQUEST_INTERVAL=0.0, GEOCODE_CITY_MAX_DISTANCE_MILES=15.0)
+@override_settings(ORS_REQUEST_INTERVAL=0.0, GEOCODE_CITY_MAX_DISTANCE_MILES=15.0, GEOCODING_PROVIDER="ors")
 class StationGeocodingTests(TestCase):
     def setUp(self):
         cache.clear()
@@ -90,7 +90,7 @@ class StationGeocodingTests(TestCase):
         self.assertFalse(point_in_state(39.07, -108.50, "IL"))
 
 
-@override_settings(ORS_REQUEST_INTERVAL=0.0)
+@override_settings(ORS_REQUEST_INTERVAL=0.0, GEOCODING_PROVIDER="ors")
 class ValidateStationsCommandTests(TestCase):
     def setUp(self):
         # Station whose coordinates are in Colorado but claims to be in Illinois.

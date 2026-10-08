@@ -299,6 +299,46 @@ Returns `{"status": "ok", "database": true}`.
 
 ---
 
+## Map providers
+
+Routing and geocoding go through a small dispatcher (`fuel/services/maps.py`),
+so the API, map page and optimizer are provider agnostic:
+
+| Setting | Values | Default | Notes |
+| ------- | ------ | ------- | ----- |
+| `ROUTING_PROVIDER` | `ors`, `osrm`, `auto` | `ors` | `osrm` uses the keyless public OSRM demo server |
+| `GEOCODING_PROVIDER` | `ors`, `nominatim`, `auto` | `ors` | `nominatim` uses the keyless public Nominatim service |
+
+`auto` tries ORS first and transparently falls back to the free provider when
+ORS is unavailable (quota exhausted, missing/rejected key, or repeated
+upstream failures), logging a single warning. This is handy for demos: with
+`GEOCODING_PROVIDER=auto`, address inputs keep working even after the ORS
+geocoding quota is used up.
+
+```bash
+# .env – keyless routing + geocoding
+ROUTING_PROVIDER=osrm
+GEOCODING_PROVIDER=nominatim
+```
+
+Provider settings are read at startup, so restart the app after editing
+`.env` (`docker compose restart web`).
+
+**Usage policy caveats**
+
+* The public OSRM demo server (`router.project-osrm.org`) and Nominatim
+  (`nominatim.openstreetmap.org`) are intended for light/demo usage. Nominatim
+  allows at most ~1 request/second and requires a descriptive User-Agent
+  (`MAPS_USER_AGENT`); production deployments should self-host or use a paid
+  provider.
+* Bulk geocoding through the public Nominatim is not permitted, so
+  `import_fuel_prices` always uses ORS unless you explicitly pass
+  `--allow-public-nominatim`.
+* OpenRouteService remains the default and the provider required by the
+  assessment brief.
+
+---
+
 ## Caching
 
 | Data | Cache | TTL |
@@ -306,6 +346,9 @@ Returns `{"status": "ok", "database": true}`.
 | Geocoding results (including negative results) | Django cache | `GEOCODE_CACHE_TTL` (default 24 h) |
 | Route (GeoJSON + summary) | Django cache | `ROUTE_CACHE_TTL` (default 1 h) |
 | Geocoded stations | Database (`FuelStation`) | permanent |
+
+Cache keys are namespaced per provider, so switching providers never serves
+stale results from another one.
 
 The default cache backend is Django's local-memory cache. In production set
 `REDIS_URL` to use Redis (recommended when running multiple gunicorn workers).
