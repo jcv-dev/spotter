@@ -123,6 +123,17 @@ python manage.py import_fuel_prices --force              # re-geocode everything
 
 ### Quota notes (important)
 
+* A **pre-geocoded fixture** is included in the repository
+  (`fuel/fixtures/fuel_stations.json`, ~2,250 stations covering the I-80
+  corridor and more). Load it with `python manage.py loaddata fuel_stations`
+  to populate a database without spending any geocoding quota – this is the
+  recommended production path. Refresh the fixture locally after further
+  import runs with:
+
+  ```bash
+  python manage.py dumpdata fuel.fuelstation > fuel/fixtures/fuel_stations.json
+  ```
+
 * The **current** HeiGIT API host `api.heigit.org` allows ~3000 geocoding
   requests/day (free "Standard" plan). The old host
   `api.openrouteservice.org` is deprecated and heavily throttled
@@ -319,7 +330,21 @@ On [Dokploy](https://dokploy.com/):
    * `OPENROUTESERVICE_API_KEY` – your key
    * optionally `REDIS_URL`, `ROUTE_CACHE_TTL`, `GEOCODE_CACHE_TTL`
 3. Expose container port **8000** (Dokploy maps your domain to it).
-4. Deploy. Then import the data once (Dokploy terminal or `docker exec`):
+4. Deploy. Then load the pre-geocoded station fixture once (Dokploy terminal or
+   `docker exec`):
+
+   ```bash
+   python manage.py loaddata fuel_stations
+   ```
+
+   The fixture ships with the repository (`fuel/fixtures/fuel_stations.json`,
+   generated from this project's own import run), so production **never calls
+   the geocoder** for those stations and your ORS quota stays untouched. After
+   that, `python manage.py import_fuel_prices` only processes states that are
+   not covered yet (existing stations are skipped – no quota spent).
+
+   To import everything from scratch instead (uses your geocoding quota,
+   ~2–3 daily windows):
 
    ```bash
    python manage.py import_fuel_prices
