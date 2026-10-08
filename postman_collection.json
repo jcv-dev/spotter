@@ -28,11 +28,42 @@
         },
         "url": {
           "raw": "{{base_url}}/api/route/",
-          "host": ["{{base_url}}"],
-          "path": ["api", "route", ""]
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "route",
+            ""
+          ]
         },
         "description": "Plan a route between two addresses with a full tank. The initial 50 gallons are not charged."
-      }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+              "const body = pm.response.json();",
+              "pm.test(\"route is a GeoJSON LineString\", () => {",
+              "    pm.expect(body.route.type).to.eql(\"LineString\");",
+              "    pm.expect(body.route.coordinates.length).to.be.greaterThan(100);",
+              "});",
+              "pm.test(\"has fuel stops and a total cost\", () => {",
+              "    pm.expect(body.fuel_stops.length).to.be.greaterThan(0);",
+              "    pm.expect(body.total_fuel_cost).to.be.greaterThan(0);",
+              "    pm.expect(body.total_gallons_purchased).to.be.greaterThan(0);",
+              "});",
+              "pm.test(\"timing and rate limit headers are present\", () => {",
+              "    pm.expect(pm.response.headers.get(\"X-Response-Time-Ms\")).to.exist;",
+              "    pm.expect(pm.response.headers.get(\"X-RateLimit-Limit\")).to.eql(\"60\");",
+              "});"
+            ]
+          }
+        }
+      ]
     },
     {
       "name": "Route - coordinates (full tank)",
@@ -50,11 +81,39 @@
         },
         "url": {
           "raw": "{{base_url}}/api/route/",
-          "host": ["{{base_url}}"],
-          "path": ["api", "route", ""]
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "route",
+            ""
+          ]
         },
         "description": "Same route as the address example but with lat/lon. Needs no geocoding, so it also works when the ORS geocoding quota is exhausted."
-      }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+              "const body = pm.response.json();",
+              "pm.test(\"plan is complete\", () => {",
+              "    pm.expect(body.fuel_stops.length).to.be.greaterThan(0);",
+              "    pm.expect(body.total_fuel_cost).to.be.greaterThan(0);",
+              "    pm.expect(body.response_time_ms).to.be.a(\"number\");",
+              "    pm.expect(body.map_url).to.include(\"/map/?\");",
+              "});",
+              "pm.test(\"stop costs add up to the total\", () => {",
+              "    const sum = body.fuel_stops.reduce((acc, s) => acc + s.cost, 0);",
+              "    pm.expect(Math.abs(sum - body.total_fuel_cost)).to.be.below(0.05);",
+              "});"
+            ]
+          }
+        }
+      ]
     },
     {
       "name": "Route - coordinates (empty tank)",
@@ -72,11 +131,34 @@
         },
         "url": {
           "raw": "{{base_url}}/api/route/",
-          "host": ["{{base_url}}"],
-          "path": ["api", "route", ""]
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "route",
+            ""
+          ]
         },
         "description": "Plan a route from Las Vegas starting with an empty tank. The first fuel stop is at/near the start (is_start_fuel=true). Los Angeles is not suitable here because the dataset has no station within 10 miles of it."
-      }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+              "const body = pm.response.json();",
+              "pm.test(\"starts empty and buys at the start\", () => {",
+              "    pm.expect(body.start_full_tank).to.eql(false);",
+              "    pm.expect(body.fuel_stops[0].is_start_fuel).to.eql(true);",
+              "    pm.expect(body.fuel_stops[0].distance_from_start_miles).to.be.below(15);",
+              "});"
+            ]
+          }
+        }
+      ]
     },
     {
       "name": "Route - short trip (no stops)",
@@ -94,11 +176,34 @@
         },
         "url": {
           "raw": "{{base_url}}/api/route/",
-          "host": ["{{base_url}}"],
-          "path": ["api", "route", ""]
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "route",
+            ""
+          ]
         },
         "description": "A trip shorter than the 500-mile range needs no fuel stops; total_fuel_cost is 0."
-      }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+              "const body = pm.response.json();",
+              "pm.test(\"a trip under the 500 mile range needs no fuel\", () => {",
+              "    pm.expect(body.total_distance_miles).to.be.below(500);",
+              "    pm.expect(body.fuel_stops.length).to.eql(0);",
+              "    pm.expect(body.total_fuel_cost).to.eql(0);",
+              "});"
+            ]
+          }
+        }
+      ]
     },
     {
       "name": "Route - invalid (outside USA)",
@@ -116,11 +221,32 @@
         },
         "url": {
           "raw": "{{base_url}}/api/route/",
-          "host": ["{{base_url}}"],
-          "path": ["api", "route", ""]
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "route",
+            ""
+          ]
         },
         "description": "Returns 400 with an error message because the start is outside the USA."
-      }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"400 Bad Request\", () => pm.response.to.have.status(400));",
+              "pm.test(\"reports an invalid location\", () => {",
+              "    pm.expect(pm.response.json().code).to.eql(\"invalid_location\");",
+              "    pm.expect(pm.response.json().error).to.include(\"outside the USA\");",
+              "});"
+            ]
+          }
+        }
+      ]
     },
     {
       "name": "Map - Leaflet page",
@@ -128,16 +254,45 @@
         "method": "GET",
         "url": {
           "raw": "{{base_url}}/map/?start=Los+Angeles,+CA&finish=New+York,+NY&start_full_tank=true",
-          "host": ["{{base_url}}"],
-          "path": ["map", ""],
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "map",
+            ""
+          ],
           "query": [
-            {"key": "start", "value": "Los Angeles, CA"},
-            {"key": "finish", "value": "New York, NY"},
-            {"key": "start_full_tank", "value": "true"}
+            {
+              "key": "start",
+              "value": "Los Angeles, CA"
+            },
+            {
+              "key": "finish",
+              "value": "New York, NY"
+            },
+            {
+              "key": "start_full_tank",
+              "value": "true"
+            }
           ]
         },
         "description": "Open in a browser: Leaflet map with the route and fuel stops. Reuses the API cache."
-      }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"renders the map data\", () => {",
+              "    pm.expect(pm.response.text()).to.include(\"route-data\");",
+              "    pm.expect(pm.response.text()).to.include(\"Fuel stops\");",
+              "});"
+            ]
+          }
+        }
+      ]
     },
     {
       "name": "Map - empty tank (Las Vegas)",
@@ -145,16 +300,44 @@
         "method": "GET",
         "url": {
           "raw": "{{base_url}}/map/?start=Las+Vegas,+NV&finish=New+York,+NY&start_full_tank=false",
-          "host": ["{{base_url}}"],
-          "path": ["map", ""],
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "map",
+            ""
+          ],
           "query": [
-            {"key": "start", "value": "Las Vegas, NV"},
-            {"key": "finish", "value": "New York, NY"},
-            {"key": "start_full_tank", "value": "false"}
+            {
+              "key": "start",
+              "value": "Las Vegas, NV"
+            },
+            {
+              "key": "finish",
+              "value": "New York, NY"
+            },
+            {
+              "key": "start_full_tank",
+              "value": "false"
+            }
           ]
         },
         "description": "Open in a browser: empty-tank start; the first marker is the start fuel station."
-      }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"renders an empty-tank plan\", () => {",
+              "    pm.expect(pm.response.text()).to.include(\"is_start_fuel\");",
+              "});"
+            ]
+          }
+        }
+      ]
     },
     {
       "name": "Health check",
@@ -162,11 +345,32 @@
         "method": "GET",
         "url": {
           "raw": "{{base_url}}/health/",
-          "host": ["{{base_url}}"],
-          "path": ["health", ""]
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "health",
+            ""
+          ]
         },
         "description": "Returns {\"status\": \"ok\", \"database\": true} when the app and database are reachable."
-      }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"database is reachable\", () => {",
+              "    const body = pm.response.json();",
+              "    pm.expect(body.status).to.eql(\"ok\");",
+              "    pm.expect(body.database).to.eql(true);",
+              "});"
+            ]
+          }
+        }
+      ]
     }
   ]
 }
