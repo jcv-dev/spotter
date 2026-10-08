@@ -52,6 +52,21 @@ def city_centroid(city: str, state: str) -> tuple[float, float] | None:
     return result.latitude, result.longitude
 
 
+def force_bulk_provider(allow_public_nominatim: bool) -> str | None:
+    """Force ORS for bulk geocoding unless the caller explicitly opts in.
+
+    The public Nominatim service does not permit bulk geocoding, so commands
+    that process many stations must not fall back to it by accident. Returns
+    the previously configured provider when it was overridden (for a warning
+    message), otherwise ``None``.
+    """
+    configured = (settings.GEOCODING_PROVIDER or "ors").lower()
+    if allow_public_nominatim:
+        return None
+    settings.GEOCODING_PROVIDER = "ors"
+    return configured if configured != "ors" else None
+
+
 def geocode_station(
     address: str,
     city: str,

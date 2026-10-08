@@ -145,11 +145,10 @@ The command is resumable and skips stations that already pass validation.
 ### Quota notes (important)
 
 * A **pre-geocoded fixture** is included in the repository
-  (`fuel/fixtures/fuel_stations.json`, ~2,250 stations covering the I-80
-  corridor and more). Load it with `python manage.py loaddata fuel_stations`
-  to populate a database without spending any geocoding quota – this is the
-  recommended production path. Refresh the fixture locally after further
-  import runs with:
+  (`fuel/fixtures/fuel_stations.json`, **6,625 stations covering the whole
+  USA**). Load it with `python manage.py loaddata fuel_stations` to populate a
+  database without spending any geocoding quota – this is the recommended
+  production path. Refresh the fixture locally after further import runs with:
 
   ```bash
   python manage.py dumpdata fuel.fuelstation > fuel/fixtures/fuel_stations.json
@@ -159,16 +158,34 @@ The command is resumable and skips stations that already pass validation.
   requests/day (free "Standard" plan). The old host
   `api.openrouteservice.org` is deprecated and heavily throttled
   (100 geocoding requests/day) – this project uses `api.heigit.org`.
-* The full dataset has ~6,600 US stations, so a complete import spans about
-  **2–3 daily quota windows**. Just re-run the command after the quota resets;
-  it continues where it stopped (the daily window resets 24 h after your first
-  request).
-* For a quick demo of the LA → New York route, import the I-80 corridor first
-  (~2,100 stations, fits in one day):
+* A full ORS import of all ~6,600 stations spans about **2–3 daily quota
+  windows**; re-run the command after the quota resets and it continues where
+  it stopped (the window resets 24 h after your first request).
 
-  ```bash
-  python manage.py import_fuel_prices --states CA,NV,UT,CO,NE,IA,IL,IN,OH,PA,NJ,NY,AZ,MI
-  ```
+### Offline city seeding (no geocoding quota)
+
+`python manage.py import_city_coordinates` fills every station that is missing
+from the database with **city-centre coordinates** from public datasets:
+
+* US Census Gazetteer place + county-subdivision files (public domain),
+* GeoNames US dump (CC BY 4.0, add `--with-geonames`) for unincorporated
+  communities.
+
+The datasets are downloaded once into `~/.cache/fuel-route` (`--cache-dir`
+overrides this) and the fill takes seconds for the whole CSV with **zero API
+calls**. Seeded stations are marked `is_approximate=true` (the map shows an
+"approx" badge).
+
+To refine them later, run the resumable, quota-aware upgrade:
+
+```bash
+python manage.py upgrade_approximate_stations           # via ORS, resumable
+python manage.py upgrade_approximate_stations --states TX,NM --limit 500
+```
+
+It re-geocodes missing/approximate stations through the validated pipeline and
+upgrades them to address-level coordinates when the address result lands close
+to the city centroid.
 
 ---
 

@@ -14,9 +14,7 @@ The command is idempotent and resumable:
 
 from __future__ import annotations
 
-import csv
 import logging
-from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from django.conf import settings
@@ -24,29 +22,9 @@ from django.core.management.base import BaseCommand, CommandError
 
 from fuel.models import FuelStation
 from fuel.services import geocoding, ors
+from fuel.services.stations_csv import load_unique_stations, save_station, station_lookup
 
 logger = logging.getLogger("fuel.import")
-
-US_STATES = {
-    "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "DC", "FL", "GA", "HI", "ID",
-    "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS", "MO",
-    "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA",
-    "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY",
-}
-
-
-def _clean(value: str | None) -> str:
-    return " ".join((value or "").split())
-
-
-def _to_int(value: str | None) -> int | None:
-    text = _clean(value)
-    if not text:
-        return None
-    try:
-        return int(float(text))
-    except ValueError:
-        return None
 
 
 class Command(BaseCommand):
@@ -94,110 +72,6 @@ class Command(BaseCommand):
             help="Parse and deduplicate only; do not call ORS or touch the database.",
         )
 
-    # ------------------------------------------------------------------ CSV ---
-    def _read_stations(
-        self,
-        path: Path,
-        states: str | None,
-        limit: int | None,
-        include_non_us: bool = False,
-    ) -> list[dict]:
-        state_filter = None
-        if states:
-            state_filter = {part.strip().upper() for part in states.split(",") if part.strip()}
-
-        unique: dict[tuple, dict] = {}
-        skipped_rows = 0
-        skipped_non_us = 0
-        with path.open(newline="", encoding="utf-8-sig") as handle:
-            reader = csv.DictReader(handle)
-            for row in reader:
-                name = _clean(row.get("Truckstop Name"))
-                address = _clean(row.get("Address"))
-                city = _clean(row.get("City"))
-                state = _clean(row.get("State")).upper()
-                truckstop_id = _to_int(row.get("OPIS Truckstop ID"))
-                rack_id = _to_int(row.get("Rack ID"))
-
-                if not name or not address or not city or len(state) != 2:
-                    skipped_rows += 1
-                    continue
-                if state_filter and state not in state_filter:
-                    continue
-                if not include_non_us and state not in US_STATES:
-                    skipped_non_us += 1
-                    continue
-                try:
-                    price = Decimal(_clean(row.get("Retail Price")))
-                except (InvalidOperation, TypeError):
-                    skipped_rows += 1
-                    continue
-
-                if truckstop_id is not None:
-                    key = (truckstop_id, address.lower(), city.lower(), state)
-                else:
-                    key = (None, name.lower(), address.lower(), city.lower(), state)
-
-                existing = unique.get(key)
-                if existing is None:
-                    unique[key] = {
-                        "name": name,
-                        "address": address,
-                        "city": city,
-                        "state": state,
-                        "truckstop_id": truckstop_id,
-                        "rack_id": rack_id,
-                        "price": price,
-                    }
-                elif price < existing["price"]:
-                    # Conservative: the cheapest price for a duplicated station.
-                    existing["price"] = price
-
-        if skipped_rows:
-            self.stdout.write(self.style.WARNING(f"Skipped {skipped_rows} malformed rows."))
-        if skipped_non_us:
-            self.stdout.write(
-                self.style.WARNING(
-                    f"Skipped {skipped_non_us} rows outside the USA (use --include-non-us to keep them)."
-                )
-            )
-
-        stations = list(unique.values())
-        # Group by location so the city-level geocode cache is used efficiently.
-        stations.sort(key=lambda s: (s["state"], s["city"], s["name"]))
-        if limit is not None:
-            stations = stations[:limit]
-        return stations
-
-    # --------------------------------------------------------------- DB IO ---
-    def _lookup(self, station: dict) -> dict:
-        lookup = {
-            "address": station["address"],
-            "city": station["city"],
-            "state": station["state"],
-        }
-        if station["truckstop_id"] is not None:
-            lookup["truckstop_id"] = station["truckstop_id"]
-        else:
-            lookup["truckstop_id__isnull"] = True
-            lookup["name"] = station["name"]
-        return lookup
-
-    def _save(self, station: dict, latitude: float, longitude: float, approximate: bool) -> FuelStation:
-        lookup = self._lookup(station)
-        obj, _created = FuelStation.objects.update_or_create(
-            **lookup,
-            defaults={
-                "name": station["name"],
-                "latitude": latitude,
-                "longitude": longitude,
-                "price": station["price"],
-                "rack_id": station["rack_id"],
-                "is_approximate": approximate,
-            },
-        )
-        return obj
-
     # ------------------------------------------------------------- geocode ---
     def _geocode(self, station: dict) -> tuple[float, float, bool] | None:
         outcome = geocoding.geocode_station(station["address"], station["city"], station["state"])
@@ -214,9 +88,22 @@ class Command(BaseCommand):
         if options["delay"] is not None:
             settings.ORS_REQUEST_INTERVAL = options["delay"]
 
-        stations = self._read_stations(
-            csv_path, options["states"], options["limit"], options["include_non_us"]
+        loaded = load_unique_stations(
+            csv_path,
+            states=options["states"],
+            limit=options["limit"],
+            include_non_us=options["include_non_us"],
         )
+        stations = loaded.stations
+        if loaded.skipped_rows:
+            self.stdout.write(self.style.WARNING(f"Skipped {loaded.skipped_rows} malformed rows."))
+        if loaded.skipped_non_us:
+            self.stdout.write(
+                self.style.WARNING(
+                    f"Skipped {loaded.skipped_non_us} rows outside the USA "
+                    "(use --include-non-us to keep them)."
+                )
+            )
         self.stdout.write(
             f"Loaded {len(stations)} unique stations from {csv_path.name} "
             f"(ORS interval: {settings.ORS_REQUEST_INTERVAL}s)."
@@ -234,16 +121,14 @@ class Command(BaseCommand):
         # Bulk imports use ORS (the assessment's geocoder) regardless of the
         # GEOCODING_PROVIDER used by the API: the public Nominatim service does
         # not permit bulk geocoding, so that path requires an explicit opt-in.
-        configured_provider = (settings.GEOCODING_PROVIDER or "ors").lower()
-        if not options["allow_public_nominatim"]:
-            settings.GEOCODING_PROVIDER = "ors"
-            if configured_provider != "ors":
-                self.stdout.write(
-                    self.style.WARNING(
-                        f"Bulk imports always use ORS (configured provider: {configured_provider}). "
-                        "Pass --allow-public-nominatim to use the public Nominatim service instead."
-                    )
+        overridden = geocoding.force_bulk_provider(options["allow_public_nominatim"])
+        if overridden is not None:
+            self.stdout.write(
+                self.style.WARNING(
+                    f"Bulk imports always use ORS (configured provider: {overridden}). "
+                    "Pass --allow-public-nominatim to use the public Nominatim service instead."
                 )
+            )
 
         if not settings.OPENROUTESERVICE_API_KEY:
             raise CommandError(
@@ -255,7 +140,7 @@ class Command(BaseCommand):
         total = len(stations)
 
         for index, station in enumerate(stations, start=1):
-            lookup = self._lookup(station)
+            lookup = station_lookup(station)
             existing = FuelStation.objects.filter(**lookup).first()
 
             if existing is not None and not options["force"]:
@@ -292,7 +177,7 @@ class Command(BaseCommand):
                     continue
 
                 latitude, longitude, approximate = geo
-                self._save(station, latitude, longitude, approximate)
+                save_station(station, latitude, longitude, approximate)
                 counters["geocoded"] += 1
                 counters["approximate"] += int(approximate)
 
