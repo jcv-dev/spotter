@@ -1,0 +1,133 @@
+{
+  "info": {
+    "name": "Fuel Route Planner",
+    "description": "Django + DRF API that returns a route with the optimal fuel stops and total fuel cost. Set the collection variable base_url to your deployment URL.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Route - addresses (full tank)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"start\": {\"address\": \"Los Angeles, CA\"},\n  \"finish\": {\"address\": \"New York, NY\"},\n  \"start_full_tank\": true\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/route/",
+          "host": ["{{base_url}}"],
+          "path": ["api", "route", ""]
+        },
+        "description": "Plan a route between two addresses with a full tank. The initial 50 gallons are not charged."
+      }
+    },
+    {
+      "name": "Route - coordinates (empty tank)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"start\": {\"lat\": 34.0522, \"lon\": -118.2437},\n  \"finish\": {\"lat\": 40.7128, \"lon\": -74.0060},\n  \"start_full_tank\": false\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/route/",
+          "host": ["{{base_url}}"],
+          "path": ["api", "route", ""]
+        },
+        "description": "Plan a route from coordinates starting with an empty tank. The first fuel stop is at/near the start."
+      }
+    },
+    {
+      "name": "Route - short trip (no stops)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"start\": {\"address\": \"Oklahoma City, OK\"},\n  \"finish\": {\"address\": \"Tulsa, OK\"}\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/route/",
+          "host": ["{{base_url}}"],
+          "path": ["api", "route", ""]
+        },
+        "description": "A trip shorter than the 500-mile range needs no fuel stops; total_fuel_cost is 0."
+      }
+    },
+    {
+      "name": "Route - invalid (outside USA)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"start\": {\"lat\": 51.5074, \"lon\": -0.1278},\n  \"finish\": {\"lat\": 40.7128, \"lon\": -74.0060}\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/route/",
+          "host": ["{{base_url}}"],
+          "path": ["api", "route", ""]
+        },
+        "description": "Returns 400 with an error message because the start is outside the USA."
+      }
+    },
+    {
+      "name": "Map - Leaflet page",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{base_url}}/map/?start=Los+Angeles,+CA&finish=New+York,+NY&start_full_tank=true",
+          "host": ["{{base_url}}"],
+          "path": ["map", ""],
+          "query": [
+            {"key": "start", "value": "Los Angeles, CA"},
+            {"key": "finish", "value": "New York, NY"},
+            {"key": "start_full_tank", "value": "true"}
+          ]
+        },
+        "description": "Open in a browser: Leaflet map with the route and fuel stops. Reuses the API cache."
+      }
+    },
+    {
+      "name": "Health check",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{base_url}}/health/",
+          "host": ["{{base_url}}"],
+          "path": ["health", ""]
+        },
+        "description": "Returns {\"status\": \"ok\", \"database\": true} when the app and database are reachable."
+      }
+    }
+  ]
+}
