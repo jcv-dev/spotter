@@ -52,7 +52,7 @@ fuel/
   tests/                        optimizer, ORS client, API, import tests
 fuel-prices-for-be-assessment.csv
 Dockerfile / docker-compose.yml / entrypoint.sh
-postman_collection.json / LOOM_SCRIPT.md
+postman_collection.json
 ```
 
 ---
