@@ -45,6 +45,14 @@
           "script": {
             "type": "text/javascript",
             "exec": [
+              "const contentType = pm.response.headers.get(\"Content-Type\") || \"\";",
+              "if (!contentType.includes(\"application/json\")) {",
+              "    pm.test(\"response is JSON (got \" + pm.response.code + \" \" + contentType + \")\", () => {",
+              "        pm.expect.fail(\"Expected JSON but the server returned \" + contentType +",
+              "            \". Check the request URL and method. Body starts with: \" + pm.response.text().slice(0, 160));",
+              "    });",
+              "    return;",
+              "}",
               "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
               "const body = pm.response.json();",
               "pm.test(\"route is a GeoJSON LineString\", () => {",
@@ -98,6 +106,14 @@
           "script": {
             "type": "text/javascript",
             "exec": [
+              "const contentType = pm.response.headers.get(\"Content-Type\") || \"\";",
+              "if (!contentType.includes(\"application/json\")) {",
+              "    pm.test(\"response is JSON (got \" + pm.response.code + \" \" + contentType + \")\", () => {",
+              "        pm.expect.fail(\"Expected JSON but the server returned \" + contentType +",
+              "            \". Check the request URL and method. Body starts with: \" + pm.response.text().slice(0, 160));",
+              "    });",
+              "    return;",
+              "}",
               "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
               "const body = pm.response.json();",
               "pm.test(\"plan is complete\", () => {",
@@ -148,6 +164,14 @@
           "script": {
             "type": "text/javascript",
             "exec": [
+              "const contentType = pm.response.headers.get(\"Content-Type\") || \"\";",
+              "if (!contentType.includes(\"application/json\")) {",
+              "    pm.test(\"response is JSON (got \" + pm.response.code + \" \" + contentType + \")\", () => {",
+              "        pm.expect.fail(\"Expected JSON but the server returned \" + contentType +",
+              "            \". Check the request URL and method. Body starts with: \" + pm.response.text().slice(0, 160));",
+              "    });",
+              "    return;",
+              "}",
               "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
               "const body = pm.response.json();",
               "pm.test(\"starts empty and buys at the start\", () => {",
@@ -193,6 +217,14 @@
           "script": {
             "type": "text/javascript",
             "exec": [
+              "const contentType = pm.response.headers.get(\"Content-Type\") || \"\";",
+              "if (!contentType.includes(\"application/json\")) {",
+              "    pm.test(\"response is JSON (got \" + pm.response.code + \" \" + contentType + \")\", () => {",
+              "        pm.expect.fail(\"Expected JSON but the server returned \" + contentType +",
+              "            \". Check the request URL and method. Body starts with: \" + pm.response.text().slice(0, 160));",
+              "    });",
+              "    return;",
+              "}",
               "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
               "const body = pm.response.json();",
               "pm.test(\"a trip under the 500 mile range needs no fuel\", () => {",
@@ -238,6 +270,14 @@
           "script": {
             "type": "text/javascript",
             "exec": [
+              "const contentType = pm.response.headers.get(\"Content-Type\") || \"\";",
+              "if (!contentType.includes(\"application/json\")) {",
+              "    pm.test(\"response is JSON (got \" + pm.response.code + \" \" + contentType + \")\", () => {",
+              "        pm.expect.fail(\"Expected JSON but the server returned \" + contentType +",
+              "            \". Check the request URL and method. Body starts with: \" + pm.response.text().slice(0, 160));",
+              "    });",
+              "    return;",
+              "}",
               "pm.test(\"400 Bad Request\", () => pm.response.to.have.status(400));",
               "pm.test(\"reports an invalid location\", () => {",
               "    pm.expect(pm.response.json().code).to.eql(\"invalid_location\");",
@@ -284,6 +324,14 @@
           "script": {
             "type": "text/javascript",
             "exec": [
+              "const contentType = pm.response.headers.get(\"Content-Type\") || \"\";",
+              "if (!contentType.includes(\"text/html\")) {",
+              "    pm.test(\"response is HTML (got \" + pm.response.code + \" \" + contentType + \")\", () => {",
+              "        pm.expect.fail(\"Expected HTML but the server returned \" + contentType +",
+              "            \". Check the request URL. Body starts with: \" + pm.response.text().slice(0, 160));",
+              "    });",
+              "    return;",
+              "}",
               "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
               "pm.test(\"renders the map data\", () => {",
               "    pm.expect(pm.response.text()).to.include(\"route-data\");",
@@ -330,6 +378,14 @@
           "script": {
             "type": "text/javascript",
             "exec": [
+              "const contentType = pm.response.headers.get(\"Content-Type\") || \"\";",
+              "if (!contentType.includes(\"text/html\")) {",
+              "    pm.test(\"response is HTML (got \" + pm.response.code + \" \" + contentType + \")\", () => {",
+              "        pm.expect.fail(\"Expected HTML but the server returned \" + contentType +",
+              "            \". Check the request URL. Body starts with: \" + pm.response.text().slice(0, 160));",
+              "    });",
+              "    return;",
+              "}",
               "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
               "pm.test(\"renders an empty-tank plan\", () => {",
               "    pm.expect(pm.response.text()).to.include(\"is_start_fuel\");",
@@ -361,6 +417,14 @@
           "script": {
             "type": "text/javascript",
             "exec": [
+              "const contentType = pm.response.headers.get(\"Content-Type\") || \"\";",
+              "if (!contentType.includes(\"application/json\")) {",
+              "    pm.test(\"response is JSON (got \" + pm.response.code + \" \" + contentType + \")\", () => {",
+              "        pm.expect.fail(\"Expected JSON but the server returned \" + contentType +",
+              "            \". Check the request URL and method. Body starts with: \" + pm.response.text().slice(0, 160));",
+              "    });",
+              "    return;",
+              "}",
               "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
               "pm.test(\"database is reachable\", () => {",
               "    const body = pm.response.json();",
