@@ -91,6 +91,9 @@
       <input type="text" id="finish" name="finish" value="{{ query_finish }}" placeholder="New York, NY or 40.71,-74.00">
     </div>
     <label class="checkbox">
+      {# Hidden field so an unchecked box still submits start_full_tank=false; #}
+      {# when the box is checked, its "true" value comes last and wins. #}
+      <input type="hidden" name="start_full_tank" value="false">
       <input type="checkbox" name="start_full_tank" value="true" {% if start_full_tank %}checked{% endif %}>
       Start with a full tank (50 gal)
     </label>

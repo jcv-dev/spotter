@@ -329,6 +329,28 @@ class MapViewTests(TestCase):
         self.assertIn("route-data", content)
         self.assertIn("Station 0.17", content)
         self.assertIn("Fuel stops", content)
+        # Hidden field so an unchecked box still submits start_full_tank=false.
+        self.assertIn('name="start_full_tank" value="false"', content)
+
+    def test_map_checkbox_unchecked_renders_and_plans_empty_tank(self):
+        self._patch_directions()
+        self._patch_geocode(GeocodeResult(*LOS_ANGELES, label="Los Angeles, CA, United States"))
+        # A station at the start is required for an empty-tank plan.
+        latitude, longitude = point_at(self.route_coords, 0.0)
+        FuelStation.objects.create(
+            name="Start Fuel", address="1 Main St", city="Town", state="TX",
+            latitude=latitude, longitude=longitude, price=Decimal("3.000"),
+        )
+        response = self.client.get(
+            "/map/",
+            {"start": "Los Angeles, CA", "finish": "New York, NY", "start_full_tank": "false"},
+        )
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        # Checkbox is rendered unchecked and the payload is an empty-tank plan.
+        self.assertIn('name="start_full_tank" value="false"', content)
+        self.assertNotIn('value="true" checked', content)
+        self.assertIn('"is_start_fuel": true', content)
 
     def test_map_page_shows_error_state(self):
         self._patch_directions()
