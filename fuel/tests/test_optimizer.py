@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import math
 import random
 from decimal import Decimal
 from types import SimpleNamespace
+from unittest import mock
 
 import numpy as np
 from django.test import TestCase, override_settings
 
-from fuel.services import geo
+from fuel.services import geo, optimizer
 from fuel.services.optimizer import (
     Candidate,
     NoFeasiblePlanError,
@@ -141,6 +143,49 @@ class ProjectionTests(TestCase):
     def test_route_length(self):
         coords = straight_route(123.4)
         self.assertAlmostEqual(route_length_miles(coords), 123.4, delta=0.2)
+
+    def test_radius_boundary_is_exact(self):
+        coords = straight_route(100)
+        midpoint_lat = 30.0 + 50.0 / geo.MILES_PER_DEGREE_LAT
+
+        def offset_station(miles):
+            lon = -100.0 + miles / (geo.MILES_PER_DEGREE_LAT * math.cos(math.radians(midpoint_lat)))
+            return make_station(midpoint_lat, lon)
+
+        inside = select_candidates(coords, [offset_station(4.9)], radius_miles=10)
+        outside = select_candidates(coords, [offset_station(5.1)], radius_miles=10)
+        self.assertEqual(len(inside), 1)
+        self.assertAlmostEqual(inside[0].detour_miles, 9.8, delta=0.05)
+        self.assertEqual(outside, [])
+
+    def test_coarse_prefilter_returns_the_same_candidates(self):
+        rng = random.Random(11)
+        t = np.linspace(0, 1, 1200)
+        coords = np.column_stack([35 + 1.2 * t + 0.12 * np.sin(25 * t), -100 + 2.5 * t])
+
+        stations = []
+        for index in range(200):
+            vertex = rng.randrange(len(coords))
+            lat, lon = coords[vertex]
+            offset = rng.uniform(0, 9)
+            angle = rng.uniform(0, 2 * math.pi)
+            dlat = offset * math.cos(angle) / geo.MILES_PER_DEGREE_LAT
+            dlon = offset * math.sin(angle) / (
+                geo.MILES_PER_DEGREE_LAT * math.cos(math.radians(lat))
+            )
+            stations.append(make_station(lat + dlat, lon + dlon, name=f"S{index}"))
+
+        prefiltered = select_candidates(coords, stations, radius_miles=10)
+        with mock.patch.object(optimizer, "_PREFILTER_POINTS", 10**9):
+            brute_force = select_candidates(coords, stations, radius_miles=10)
+
+        def summary(candidates):
+            return [
+                (c.name, round(c.along_miles, 4), round(c.detour_miles, 4)) for c in candidates
+            ]
+
+        self.assertGreater(len(prefiltered), 10)
+        self.assertEqual(summary(prefiltered), summary(brute_force))
 
 
 @override_settings(ORS_REQUEST_INTERVAL=0.0)

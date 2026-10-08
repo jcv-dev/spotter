@@ -79,6 +79,73 @@ def route_length_miles(coords: np.ndarray) -> float:
     return float(cum[-1]) if len(cum) else 0.0
 
 
+def _project_station(
+    coords: np.ndarray,
+    cum: np.ndarray,
+    station,
+    nearest: int,
+    radius_miles: float,
+    window: int,
+) -> Candidate | None:
+    """Exact projection of one station around a known nearest vertex."""
+    s_lat = float(station.latitude)
+    s_lon = float(station.longitude)
+
+    nearest = min(max(nearest, 0), len(coords) - 1)
+    lo = max(0, nearest - window)
+    hi = min(len(coords) - 1, nearest + window)
+    if hi <= lo:
+        return None
+
+    # Exact-ish projection in the station's local tangent plane.
+    cos_st = max(math.cos(math.radians(s_lat)), 1e-6)
+    ax = (coords[lo:hi, 1] - s_lon) * MILES_PER_DEGREE_LAT * cos_st
+    ay = (coords[lo:hi, 0] - s_lat) * MILES_PER_DEGREE_LAT
+    bx = (coords[lo + 1 : hi + 1, 1] - s_lon) * MILES_PER_DEGREE_LAT * cos_st
+    by = (coords[lo + 1 : hi + 1, 0] - s_lat) * MILES_PER_DEGREE_LAT
+    abx = bx - ax
+    aby = by - ay
+    seg_len_sq = abx * abx + aby * aby
+    seg_len_sq[seg_len_sq == 0] = 1e-12
+
+    # P is the origin; the projection parameter is dot(-A, AB) / |AB|^2.
+    t = np.clip(-(ax * abx + ay * aby) / seg_len_sq, 0.0, 1.0)
+    cx = ax + t * abx
+    cy = ay + t * aby
+    distances = np.hypot(cx, cy)
+
+    k = int(np.argmin(distances))
+    distance_to_route = float(distances[k])
+    detour_miles = 2.0 * distance_to_route
+    # Keep only stations whose (round-trip) detour fits the radius.
+    if detour_miles > radius_miles:
+        return None
+
+    segment = lo + k
+    along = float(cum[segment] + t[k] * (cum[segment + 1] - cum[segment]))
+    along = min(max(along, 0.0), float(cum[-1]))
+
+    return Candidate(
+        station_id=getattr(station, "id", None),
+        name=station.name,
+        address=station.address,
+        city=station.city,
+        state=station.state,
+        latitude=s_lat,
+        longitude=s_lon,
+        price=float(station.price),
+        is_approximate=bool(getattr(station, "is_approximate", False)),
+        along_miles=along,
+        detour_miles=detour_miles,
+    )
+
+
+#: Coarse prefilter resolution: the polyline is decimated to about this many
+#: points before the exact (windowed) projection runs on the survivors.
+_PREFILTER_POINTS = 600
+_PREFILTER_CHUNK = 256
+
+
 def select_candidates(
     coords: np.ndarray,
     stations,
@@ -90,6 +157,9 @@ def select_candidates(
     coords = np.asarray(coords, dtype=float)
     if len(coords) < 2:
         return []
+    stations = list(stations)
+    if not stations:
+        return []
 
     cum = cumulative_miles(coords)
     lat_ref = float(coords[0, 0])
@@ -100,66 +170,55 @@ def select_candidates(
     plane_x = (coords[:, 1] - lon_ref) * MILES_PER_DEGREE_LAT * cos_ref
     plane_y = (coords[:, 0] - lat_ref) * MILES_PER_DEGREE_LAT
 
+    # --- coarse prefilter ---------------------------------------------------
+    # Distance to a decimated polyline is computed for every station in one
+    # vectorised pass; only the survivors get the exact segment projection.
+    # The threshold is conservative: plane distortion and the gap between
+    # sampled points are both covered, so no valid candidate can be dropped.
+    step = max(1, len(coords) // _PREFILTER_POINTS)
+    sample_indices = np.arange(0, len(coords), step)
+    if sample_indices[-1] != len(coords) - 1:
+        sample_indices = np.append(sample_indices, len(coords) - 1)
+    sample_x = plane_x[sample_indices]
+    sample_y = plane_y[sample_indices]
+    gaps = np.hypot(np.diff(sample_x), np.diff(sample_y))
+    max_gap = float(gaps.max()) if gaps.size else 0.0
+    threshold = (radius_miles / 2.0 + max_gap / 2.0) * 1.3 + 0.05
+
+    station_lat = np.array([float(s.latitude) for s in stations])
+    station_lon = np.array([float(s.longitude) for s in stations])
+    station_x = (station_lon - lon_ref) * MILES_PER_DEGREE_LAT * cos_ref
+    station_y = (station_lat - lat_ref) * MILES_PER_DEGREE_LAT
+
+    nearest = np.zeros(len(stations), dtype=np.int64)
+    keep = np.zeros(len(stations), dtype=bool)
+    for chunk_start in range(0, len(stations), _PREFILTER_CHUNK):
+        chunk_end = min(chunk_start + _PREFILTER_CHUNK, len(stations))
+        dx = station_x[chunk_start:chunk_end, None] - sample_x[None, :]
+        dy = station_y[chunk_start:chunk_end, None] - sample_y[None, :]
+        distances_sq = dx * dx + dy * dy
+        best = np.argmin(distances_sq, axis=1)
+        rows = np.arange(chunk_end - chunk_start)
+        nearest[chunk_start:chunk_end] = sample_indices[best]
+        keep[chunk_start:chunk_end] = np.sqrt(distances_sq[rows, best]) <= threshold
+
+    # --- exact projection of the survivors ----------------------------------
     candidates: list[Candidate] = []
-    for station in stations:
-        s_lat = float(station.latitude)
-        s_lon = float(station.longitude)
-        st_x = (s_lon - lon_ref) * MILES_PER_DEGREE_LAT * cos_ref
-        st_y = (s_lat - lat_ref) * MILES_PER_DEGREE_LAT
-
-        nearest = int(np.argmin((plane_x - st_x) ** 2 + (plane_y - st_y) ** 2))
-        lo = max(0, nearest - window)
-        hi = min(len(coords) - 1, nearest + window)
-        if hi <= lo:
-            continue
-
-        # Exact-ish projection in the station's local tangent plane.
-        cos_st = max(math.cos(math.radians(s_lat)), 1e-6)
-        ax = (coords[lo:hi, 1] - s_lon) * MILES_PER_DEGREE_LAT * cos_st
-        ay = (coords[lo:hi, 0] - s_lat) * MILES_PER_DEGREE_LAT
-        bx = (coords[lo + 1 : hi + 1, 1] - s_lon) * MILES_PER_DEGREE_LAT * cos_st
-        by = (coords[lo + 1 : hi + 1, 0] - s_lat) * MILES_PER_DEGREE_LAT
-        abx = bx - ax
-        aby = by - ay
-        seg_len_sq = abx * abx + aby * aby
-        seg_len_sq[seg_len_sq == 0] = 1e-12
-
-        # P is the origin; the projection parameter is dot(-A, AB) / |AB|^2.
-        t = np.clip(-(ax * abx + ay * aby) / seg_len_sq, 0.0, 1.0)
-        cx = ax + t * abx
-        cy = ay + t * aby
-        distances = np.hypot(cx, cy)
-
-        k = int(np.argmin(distances))
-        distance_to_route = float(distances[k])
-        detour_miles = 2.0 * distance_to_route
-        # Keep only stations whose (round-trip) detour fits the radius.
-        if detour_miles > radius_miles:
-            continue
-
-        segment = lo + k
-        along = float(cum[segment] + t[k] * (cum[segment + 1] - cum[segment]))
-        along = min(max(along, 0.0), float(cum[-1]))
-
-        candidates.append(
-            Candidate(
-                station_id=getattr(station, "id", None),
-                name=station.name,
-                address=station.address,
-                city=station.city,
-                state=station.state,
-                latitude=s_lat,
-                longitude=s_lon,
-                price=float(station.price),
-                is_approximate=bool(getattr(station, "is_approximate", False)),
-                along_miles=along,
-                detour_miles=detour_miles,
-            )
+    for index in np.nonzero(keep)[0]:
+        candidate = _project_station(
+            coords, cum, stations[index], int(nearest[index]), radius_miles, window
         )
+        if candidate is not None:
+            candidates.append(candidate)
 
     candidates.sort(key=lambda c: (c.along_miles, c.detour_miles, c.price))
     logger.info(
-        "Selected %d candidate stations within %g miles of the route", len(candidates), radius_miles
+        "Selected %d candidate stations within %g miles of the route "
+        "(prefiltered %d -> %d stations)",
+        len(candidates),
+        radius_miles,
+        len(stations),
+        int(keep.sum()),
     )
     return candidates
 

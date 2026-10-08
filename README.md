@@ -246,11 +246,12 @@ Response (abridged):
 }
 ```
 
-`response_time_ms` is the server-side plan computation time (geocoding/route
-cache hits make it drop sharply – e.g. ~2300 ms cold vs ~430 ms cached in a
-live run). Every response additionally carries the total request time as the
-`X-Response-Time-Ms` and standard `Server-Timing: app;dur=...` headers, and
-the map page shows the computation time in its panel.
+`response_time_ms` is the server-side plan computation time. It drops sharply
+once caches are warm: a live run measured ~1,700 ms cold (ORS route call) vs
+~40 ms for repeated requests. Every response additionally carries the total
+request time as the `X-Response-Time-Ms` and standard
+`Server-Timing: app;dur=...` headers, and the map page shows the computation
+time in its panel.
 
 Status codes:
 
@@ -387,11 +388,21 @@ Provider settings are read at startup, so restart the app after editing
 | Data | Cache | TTL |
 | ---- | ----- | --- |
 | Geocoding results (including negative results) | Django cache | `GEOCODE_CACHE_TTL` (default 24 h) |
-| Route (GeoJSON + summary) | Django cache | `ROUTE_CACHE_TTL` (default 1 h) |
+| Provider route (full geometry + summary) | Django cache | `ROUTE_CACHE_TTL` (default 1 h) |
+| Simplified route geometry + GeoJSON | Django cache | `ROUTE_CACHE_TTL` |
+| Projected candidate stations per route | Django cache | `CANDIDATES_CACHE_TTL` (default 1 h), keyed by a station-data version |
 | Geocoded stations | Database (`FuelStation`) | permanent |
 
 Cache keys are namespaced per provider, so switching providers never serves
-stale results from another one.
+stale results from another one. The station-data version (row count + latest
+`updated_at`, itself cached for 60 s) invalidates the candidate cache
+automatically after imports or price updates.
+
+**Performance:** a cold request is dominated by the provider call (~1.7 s for
+a cross-country ORS route); repeated requests are served from the caches above
+and complete in **~40–60 ms** (simplify + projection + DP skipped), with
+responses gzipped by Django (a 2,790-mile GeoJSON drops from ~150 KB to
+~45 KB).
 
 The default cache backend is Django's local-memory cache. In production set
 `REDIS_URL` to use Redis (recommended when running multiple gunicorn workers).
@@ -436,16 +447,19 @@ Set `DATABASE_URL=postgres://user:password@host:5432/dbname` in the app's
 environment variables. When both run in the same Dokploy project, use the
 internal hostname from the database dashboard.
 
-### 2. Redis – optional
+### 2. Redis – recommended for production
 
-**Not required.** Without `REDIS_URL` the app uses Django's local-memory cache:
+Without `REDIS_URL` the app uses Django's local-memory cache:
 
-* geocoding/route caches live per gunicorn worker and reset on redeploy
-  (harmless – the next requests simply call the provider again),
+* geocoding/route/geometry/candidate caches live **per gunicorn worker** and
+  reset on redeploy, so a repeat request that lands on a cold worker pays the
+  full computation again,
 * the 60 req/min rate limit is enforced per worker rather than globally.
 
-For shared caches and an exact cross-worker rate limit, create a Redis service
-in Dokploy and set `REDIS_URL=redis://...`.
+With the Dockerfile's 3 gunicorn workers, adding Redis (create one in Dokploy
+and set `REDIS_URL=redis://...`) makes all caches shared and every repeat
+request fast (~40–60 ms). It is not required for correctness – only for
+consistent performance under multiple workers.
 
 ### 3. Application
 

@@ -16,6 +16,8 @@ from urllib.parse import urlencode
 
 import numpy as np
 from django.conf import settings
+from django.core.cache import cache
+from django.db.models import Count, Max
 
 from fuel.models import FuelStation
 
@@ -136,6 +138,74 @@ def _load_candidates(coords: np.ndarray, radius_miles: float):
     return select_candidates(coords, stations, radius_miles)
 
 
+@dataclass
+class _RouteGeometry:
+    coordinates: np.ndarray
+    route_miles: float
+    geojson: dict
+
+
+def _route_cache_signature(start: Location, finish: Location) -> str:
+    provider = (settings.ROUTING_PROVIDER or "ors").lower()
+    return (
+        f"{provider}:{start.latitude:.6f},{start.longitude:.6f}"
+        f":{finish.latitude:.6f},{finish.longitude:.6f}"
+    )
+
+
+def _stations_version() -> str:
+    """Cheap version of the station table so cached candidates refresh after
+    imports/price updates (the version itself is cached for a minute)."""
+    version = cache.get("fuel:stations-version")
+    if version is None:
+        aggregate = FuelStation.objects.aggregate(count=Count("id"), latest=Max("updated_at"))
+        latest = aggregate["latest"].timestamp() if aggregate["latest"] else 0.0
+        version = f"{aggregate['count']}:{latest:.3f}"
+        cache.set("fuel:stations-version", version, 60)
+    return version
+
+
+def _route_geometry(start: Location, finish: Location, directions) -> _RouteGeometry:
+    """Simplify the polyline once and cache it (geometry + distance + GeoJSON)."""
+    key = f"route:geometry:{_route_cache_signature(start, finish)}"
+    cached = cache.get(key)
+    if cached is not None:
+        return cached
+
+    coordinates = simplify_polyline(
+        np.asarray(directions.coordinates, dtype=float),
+        tolerance_miles=0.005,
+    )
+    geometry = {
+        "type": "LineString",
+        "coordinates": [
+            [round(float(lon), 5), round(float(lat), 5)] for lat, lon in coordinates
+        ],
+    }
+    result = _RouteGeometry(
+        coordinates=coordinates,
+        route_miles=route_length_miles(coordinates),
+        geojson=geometry,
+    )
+    cache.set(key, result, settings.ROUTE_CACHE_TTL)
+    return result
+
+
+def _route_candidates(start: Location, finish: Location, coords: np.ndarray, radius_miles: float):
+    """Cache the projected candidate stations for a route."""
+    key = (
+        f"route:candidates:{_route_cache_signature(start, finish)}"
+        f":{radius_miles:g}:{_stations_version()}"
+    )
+    cached = cache.get(key)
+    if cached is not None:
+        return cached
+
+    candidates = _load_candidates(coords, radius_miles)
+    cache.set(key, candidates, settings.CANDIDATES_CACHE_TTL)
+    return candidates
+
+
 def _format_spec_for_query(spec: dict) -> str:
     address = (spec.get("address") or "").strip()
     if address:
@@ -191,14 +261,16 @@ def build_route_response(start_spec: dict, finish_spec: dict, start_full_tank: b
         raise RouteUnavailableError(f"Could not compute the route: {exc}") from exc
 
     # Simplify slightly (<= ~8 m deviation) to keep responses/caches small
-    # while staying accurate for station projection and display.
-    coords = simplify_polyline(np.asarray(directions.coordinates, dtype=float), tolerance_miles=0.005)
-    route_miles = route_length_miles(coords)
+    # while staying accurate for station projection and display. The result is
+    # cached per route so repeated requests skip the CPU work entirely.
+    geometry_info = _route_geometry(start, finish, directions)
+    coords = geometry_info.coordinates
+    route_miles = geometry_info.route_miles
     if route_miles <= 0:
         raise RouteUnavailableError("The route is empty; check the start and finish locations.")
 
     radius = settings.FUEL_STATION_RADIUS_MILES
-    candidates = _load_candidates(coords, radius)
+    candidates = _route_candidates(start, finish, coords, radius)
 
     try:
         plan = optimize_fuel_stops(
@@ -210,13 +282,8 @@ def build_route_response(start_spec: dict, finish_spec: dict, start_full_tank: b
     except NoFeasiblePlanError as exc:
         raise NoFeasibleFuelPlanError(str(exc)) from exc
 
-    geometry = {
-        "type": "LineString",
-        "coordinates": [[round(lon, 6), round(lat, 6)] for lat, lon in coords],
-    }
-
     return {
-        "route": geometry,
+        "route": geometry_info.geojson,
         "total_distance_miles": round(route_miles, 1),
         "route_duration_hours": round(directions.duration_seconds / 3600.0, 2),
         "fuel_stops": [_serialize_stop(stop) for stop in plan.stops],
