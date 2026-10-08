@@ -316,14 +316,16 @@ def optimize_fuel_stops(
             prefix = np.minimum.accumulate(adjusted)
             if not np.isfinite(prefix).any():
                 continue
-            best = inf
-            best_index = 0
-            for k in range(levels):
-                value = adjusted[k]
-                if value < best:
-                    best = value
-                    best_index = k
-                prev_arrival[i, k] = best_index
+            # First index of the running minimum (the arrival fuel level),
+            # vectorized: a new minimum only starts where the value drops
+            # below the previous prefix minimum. Strict ``<`` keeps the same
+            # tie-breaking as a plain scan.
+            previous_min = np.empty(levels)
+            previous_min[0] = inf
+            previous_min[1:] = prefix[:-1]
+            prev_arrival[i] = np.maximum.accumulate(
+                np.where(adjusted < previous_min, departure_levels, -1)
+            )
             departure = grid * price + detour_gallons * price + prefix
 
         # ---- travel to every station (and the finish) within range ----

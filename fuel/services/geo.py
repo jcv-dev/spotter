@@ -37,6 +37,38 @@ def cumulative_miles(coords: np.ndarray) -> np.ndarray:
     return np.concatenate([[0.0], np.cumsum(segment)])
 
 
+def decode_polyline(encoded: str, precision: int = 5) -> list[tuple[float, float]]:
+    """Decode a Google/ORS/OSRM encoded polyline into ``(lat, lon)`` tuples.
+
+    Both routing providers can return geometry in this compact format (ORS
+    ``/json``, OSRM ``geometries=polyline``), which is several times smaller
+    than GeoJSON on the wire. ``precision`` 5 (the default) is ~1 m – far below
+    the tolerance used when simplifying the route for storage/display.
+    """
+    coordinates: list[tuple[float, float]] = []
+    index = 0
+    lat = 0
+    lon = 0
+    length = len(encoded)
+    while index < length:
+        values = [0, 0]
+        for axis in (0, 1):
+            result = 0
+            shift = 0
+            while True:
+                chunk = ord(encoded[index]) - 63
+                index += 1
+                result |= (chunk & 0x1F) << shift
+                shift += 5
+                if chunk < 0x20:
+                    break
+            values[axis] = ~(result >> 1) if result & 1 else result >> 1
+        lat += values[0]
+        lon += values[1]
+        coordinates.append((lat / 10**precision, lon / 10**precision))
+    return coordinates
+
+
 def simplify_polyline(coords: np.ndarray, tolerance_miles: float = 0.002) -> np.ndarray:
     """Douglas-Peucker simplification using a local equirectangular plane."""
     coords = np.asarray(coords, dtype=float)

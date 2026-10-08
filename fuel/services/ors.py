@@ -3,7 +3,11 @@
 Two endpoints are used:
 
 * ``/pelias/v1/search`` – address -> coordinates (geocoding).
-* ``/openrouteservice/v2/directions/{profile}/geojson`` – coordinates -> route geometry.
+* ``/openrouteservice/v2/directions/{profile}/json`` – coordinates -> route.
+  The JSON endpoint returns the geometry as an encoded polyline (~80 KB for a
+  cross-country route instead of ~490 KB of GeoJSON), which cuts the cold
+  download time roughly in half; ``decode_polyline`` restores the coordinates
+  at ~1 m precision.
 
 Both are cached through Django's cache framework to keep external calls to a
 minimum (geocoding for 24h by default, routes for 1h).
@@ -13,6 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import threading
 import time
 from dataclasses import dataclass
 
@@ -26,6 +31,8 @@ from .errors import (
     ProviderQuotaError,
     ProviderRequestError,
 )
+from .geo import decode_polyline
+from .http import session
 
 logger = logging.getLogger("fuel.ors")
 
@@ -76,17 +83,23 @@ def _cache_key(kind: str, *parts: str) -> str:
 
 
 _last_request_at = 0.0
+_throttle_lock = threading.Lock()
 
 
 def _throttle() -> None:
-    """Keep at least ``ORS_REQUEST_INTERVAL`` seconds between real HTTP calls."""
+    """Keep at least ``ORS_REQUEST_INTERVAL`` seconds between real HTTP calls.
+
+    The lock serialises concurrent (geocoding) threads of a threaded worker so
+    the interval is honoured globally within the process.
+    """
     global _last_request_at
     interval = float(getattr(settings, "ORS_REQUEST_INTERVAL", 0.0) or 0.0)
-    if interval > 0:
-        wait = _last_request_at + interval - time.monotonic()
-        if wait > 0:
-            time.sleep(wait)
-    _last_request_at = time.monotonic()
+    with _throttle_lock:
+        if interval > 0:
+            wait = _last_request_at + interval - time.monotonic()
+            if wait > 0:
+                time.sleep(wait)
+        _last_request_at = time.monotonic()
 
 
 def _request(
@@ -107,7 +120,7 @@ def _request(
             time.sleep(backoff)
         _throttle()
         try:
-            response = requests.request(
+            response = session.request(
                 method,
                 url,
                 params=params,
@@ -248,14 +261,18 @@ def get_directions(
         "coordinates": [[start_lon, start_lat], [finish_lon, finish_lat]],
         "instructions": False,
     }
-    url = f"{_base_url()}/openrouteservice/v2/directions/{profile}/geojson"
+    url = f"{_base_url()}/openrouteservice/v2/directions/{profile}/json"
     logger.info("Requesting ORS directions %s -> %s", start, finish)
     data = _request("POST", url, json_body=body, headers={"Authorization": api_key})
 
     try:
-        feature = data["features"][0]
-        coordinates = [(float(lat), float(lon)) for lon, lat in feature["geometry"]["coordinates"]]
-        summary = feature["properties"]["summary"]
+        route = data["routes"][0]
+        geometry = route["geometry"]
+        if isinstance(geometry, str):
+            coordinates = decode_polyline(geometry)
+        else:  # GeoJSON geometry, in case the server does not use encoded polylines
+            coordinates = [(float(lat), float(lon)) for lon, lat in geometry["coordinates"]]
+        summary = route["summary"]
         result = DirectionsResult(
             coordinates=coordinates,
             distance_miles=float(summary["distance"]) / METERS_PER_MILE,

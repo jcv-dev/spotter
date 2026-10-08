@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import threading
 import time
 
 import requests
@@ -17,12 +18,14 @@ from django.conf import settings
 from django.core.cache import cache
 
 from .errors import ProviderRequestError
+from .http import session
 from .ors import GeocodeResult
 
 logger = logging.getLogger("fuel.nominatim")
 
 _MISSING = object()
 _last_request_at = 0.0
+_throttle_lock = threading.Lock()
 
 
 def _cache_key(kind: str, *parts: str) -> str:
@@ -31,14 +34,19 @@ def _cache_key(kind: str, *parts: str) -> str:
 
 
 def _throttle() -> None:
-    """Keep at least ``NOMINATIM_REQUEST_INTERVAL`` seconds between requests."""
+    """Keep at least ``NOMINATIM_REQUEST_INTERVAL`` seconds between requests.
+
+    The lock serialises concurrent (geocoding) threads of a threaded worker so
+    the public server's ~1 request/s policy is honoured within the process.
+    """
     global _last_request_at
     interval = float(getattr(settings, "NOMINATIM_REQUEST_INTERVAL", 0.0) or 0.0)
-    if interval > 0:
-        wait = _last_request_at + interval - time.monotonic()
-        if wait > 0:
-            time.sleep(wait)
-    _last_request_at = time.monotonic()
+    with _throttle_lock:
+        if interval > 0:
+            wait = _last_request_at + interval - time.monotonic()
+            if wait > 0:
+                time.sleep(wait)
+        _last_request_at = time.monotonic()
 
 
 def _request(url: str, params: dict, retries: int = 3) -> list:
@@ -52,7 +60,7 @@ def _request(url: str, params: dict, retries: int = 3) -> list:
             time.sleep(backoff)
         _throttle()
         try:
-            response = requests.get(
+            response = session.get(
                 url, params=params, headers=headers, timeout=settings.ORS_TIMEOUT_SECONDS
             )
         except requests.RequestException as exc:

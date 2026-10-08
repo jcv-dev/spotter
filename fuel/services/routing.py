@@ -11,6 +11,7 @@ import logging
 import math
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from urllib.parse import urlencode
 
@@ -122,6 +123,25 @@ def parse_location_query(value: str) -> dict:
     return {"address": (value or "").strip()}
 
 
+def _has_address(spec: dict) -> bool:
+    return isinstance(spec, dict) and bool((spec.get("address") or "").strip())
+
+
+def _resolve_locations(start_spec: dict, finish_spec: dict) -> tuple[Location, Location]:
+    """Resolve both endpoints, geocoding them concurrently when possible.
+
+    Two address endpoints need two independent geocoding round trips; running
+    them in parallel saves one full round trip on a cold request. Errors are
+    re-raised in the caller's thread with the same types as before.
+    """
+    if _has_address(start_spec) and _has_address(finish_spec):
+        with ThreadPoolExecutor(max_workers=2, thread_name_prefix="geocode") as pool:
+            start_future = pool.submit(resolve_location, start_spec)
+            finish_future = pool.submit(resolve_location, finish_spec)
+            return start_future.result(), finish_future.result()
+    return resolve_location(start_spec), resolve_location(finish_spec)
+
+
 def _load_candidates(coords: np.ndarray, radius_miles: float):
     """Query stations in the route's bounding box, then project them exactly."""
     lats = coords[:, 0]
@@ -143,6 +163,24 @@ class _RouteGeometry:
     coordinates: np.ndarray
     route_miles: float
     geojson: dict
+    duration_seconds: float
+
+
+def _plan_cache_key(
+    start: Location, finish: Location, start_full_tank: bool, radius_miles: float
+) -> str:
+    """Key for the fully computed plan (route + candidates + DP result).
+
+    Includes the vehicle/tank settings and the station-data version, so a
+    price import or a settings change invalidates cached plans automatically.
+    """
+    return (
+        f"route:plan:{_route_cache_signature(start, finish)}"
+        f":{radius_miles:g}:{int(bool(start_full_tank))}:{_stations_version()}"
+        f":{float(settings.TANK_CAPACITY_GALLONS):g}"
+        f":{float(settings.MILES_PER_GALLON):g}"
+        f":{float(settings.FUEL_GRID_STEP_GALLONS):g}"
+    )
 
 
 def _route_cache_signature(start: Location, finish: Location) -> str:
@@ -165,12 +203,25 @@ def _stations_version() -> str:
     return version
 
 
-def _route_geometry(start: Location, finish: Location, directions) -> _RouteGeometry:
-    """Simplify the polyline once and cache it (geometry + distance + GeoJSON)."""
+def _route_geometry(start: Location, finish: Location) -> _RouteGeometry:
+    """Simplify the polyline once and cache it (geometry + distance + GeoJSON).
+
+    The provider is only called on a cache miss, so a warm request never has to
+    deserialize the (larger) raw directions result just to read its duration.
+    """
     key = f"route:geometry:{_route_cache_signature(start, finish)}"
     cached = cache.get(key)
     if cached is not None:
         return cached
+
+    try:
+        directions = maps.get_directions(
+            (start.latitude, start.longitude), (finish.latitude, finish.longitude)
+        )
+    except ProviderConfigurationError as exc:
+        raise ORSNotConfiguredError(str(exc)) from exc
+    except ProviderError as exc:
+        raise RouteUnavailableError(f"Could not compute the route: {exc}") from exc
 
     coordinates = simplify_polyline(
         np.asarray(directions.coordinates, dtype=float),
@@ -186,6 +237,7 @@ def _route_geometry(start: Location, finish: Location, directions) -> _RouteGeom
         coordinates=coordinates,
         route_miles=route_length_miles(coordinates),
         geojson=geometry,
+        duration_seconds=float(directions.duration_seconds),
     )
     cache.set(key, result, settings.ROUTE_CACHE_TTL)
     return result
@@ -242,34 +294,71 @@ def _serialize_stop(stop) -> dict:
     }
 
 
+def _assemble_response(
+    core: dict,
+    start: Location,
+    finish: Location,
+    start_spec: dict,
+    finish_spec: dict,
+    start_full_tank: bool,
+    started: float,
+) -> dict:
+    """Build the HTTP payload from a cached/computed plan core.
+
+    ``core`` is copied so cached entries are never mutated; the per-request
+    fields (labels, map URL, timing) are (re)computed here.
+    """
+    payload = dict(core)
+    payload.update(
+        {
+            "start": {
+                "label": start.label,
+                "latitude": round(start.latitude, 6),
+                "longitude": round(start.longitude, 6),
+            },
+            "finish": {
+                "label": finish.label,
+                "latitude": round(finish.latitude, 6),
+                "longitude": round(finish.longitude, 6),
+            },
+            "start_full_tank": bool(start_full_tank),
+            "map_url": _map_url(start_spec, finish_spec, start_full_tank),
+            "response_time_ms": round((time.perf_counter() - started) * 1000.0, 1),
+        }
+    )
+    return payload
+
+
 def build_route_response(start_spec: dict, finish_spec: dict, start_full_tank: bool = True) -> dict:
-    """Full pipeline: resolve -> route -> candidates -> optimal fuel plan."""
+    """Full pipeline: resolve -> route -> candidates -> optimal fuel plan.
+
+    The computed plan is cached as a whole, so a repeated request only resolves
+    the endpoints (cached) and assembles the payload.
+    """
     started = time.perf_counter()
-    start = resolve_location(start_spec)
-    finish = resolve_location(finish_spec)
+    start, finish = _resolve_locations(start_spec, finish_spec)
     logger.info(
         "Route request %s -> %s (start_full_tank=%s)", start.label, finish.label, start_full_tank
     )
 
-    try:
-        directions = maps.get_directions(
-            (start.latitude, start.longitude), (finish.latitude, finish.longitude)
+    radius = float(settings.FUEL_STATION_RADIUS_MILES)
+    plan_key = _plan_cache_key(start, finish, start_full_tank, radius)
+    cached = cache.get(plan_key)
+    if cached is not None:
+        return _assemble_response(
+            cached, start, finish, start_spec, finish_spec, start_full_tank, started
         )
-    except ProviderConfigurationError as exc:
-        raise ORSNotConfiguredError(str(exc)) from exc
-    except ProviderError as exc:
-        raise RouteUnavailableError(f"Could not compute the route: {exc}") from exc
 
     # Simplify slightly (<= ~8 m deviation) to keep responses/caches small
-    # while staying accurate for station projection and display. The result is
-    # cached per route so repeated requests skip the CPU work entirely.
-    geometry_info = _route_geometry(start, finish, directions)
+    # while staying accurate for station projection and display. Geometry and
+    # candidates are cached separately from the plan so a plan-cache miss
+    # (e.g. after a price import) does not re-hit the provider.
+    geometry_info = _route_geometry(start, finish)
     coords = geometry_info.coordinates
     route_miles = geometry_info.route_miles
     if route_miles <= 0:
         raise RouteUnavailableError("The route is empty; check the start and finish locations.")
 
-    radius = settings.FUEL_STATION_RADIUS_MILES
     candidates = _route_candidates(start, finish, coords, radius)
 
     try:
@@ -282,25 +371,16 @@ def build_route_response(start_spec: dict, finish_spec: dict, start_full_tank: b
     except NoFeasiblePlanError as exc:
         raise NoFeasibleFuelPlanError(str(exc)) from exc
 
-    return {
+    core = {
         "route": geometry_info.geojson,
         "total_distance_miles": round(route_miles, 1),
-        "route_duration_hours": round(directions.duration_seconds / 3600.0, 2),
+        "route_duration_hours": round(geometry_info.duration_seconds / 3600.0, 2),
         "fuel_stops": [_serialize_stop(stop) for stop in plan.stops],
         "total_fuel_cost": round(plan.total_cost, 2),
         "total_gallons_purchased": round(plan.total_gallons, 2),
         "remaining_fuel_gallons": round(plan.remaining_fuel_gallons, 2),
-        "start": {
-            "label": start.label,
-            "latitude": round(start.latitude, 6),
-            "longitude": round(start.longitude, 6),
-        },
-        "finish": {
-            "label": finish.label,
-            "latitude": round(finish.latitude, 6),
-            "longitude": round(finish.longitude, 6),
-        },
-        "start_full_tank": bool(start_full_tank),
-        "map_url": _map_url(start_spec, finish_spec, start_full_tank),
-        "response_time_ms": round((time.perf_counter() - started) * 1000.0, 1),
     }
+    cache.set(plan_key, core, settings.PLAN_CACHE_TTL)
+    return _assemble_response(
+        core, start, finish, start_spec, finish_spec, start_full_tank, started
+    )

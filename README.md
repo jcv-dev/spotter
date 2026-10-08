@@ -35,8 +35,9 @@ money spent on fuel. A Leaflet map page renders the same result.
   happen at a station at/near the start location.
 * Optimal fuel stops are chosen with a **dynamic program** that accounts for
   the price of fuel *and* the fuel burned on the detour to each station.
-* Geocoding and route responses are cached (24 h / 1 h by default), so
-  repeated requests and the map page never re-hit the external API.
+* Geocoding, route geometry and the fully computed plan are cached (24 h /
+  1 h by default), so repeated requests and the map page never re-hit the
+  external API and skip the optimiser entirely.
 
 ---
 
@@ -51,6 +52,7 @@ fuel/
   templates/fuel/map.html       Leaflet map page
   services/
     geo.py                      haversine / polyline helpers (numpy)
+    http.py                     shared requests session (connection pooling)
     ors.py                      OpenRouteService client (caching, retries)
     optimizer.py                candidate projection + DP fuel planner
     routing.py                  service layer shared by API and map
@@ -246,10 +248,11 @@ Response (abridged):
 }
 ```
 
-`response_time_ms` is the server-side plan computation time. It drops sharply
-once caches are warm: a live run measured ~1,700 ms cold (ORS route call) vs
-~40 ms for repeated requests. Every response additionally carries the total
-request time as the `X-Response-Time-Ms` and standard
+`response_time_ms` is the server-side response time (cache hits included). It
+drops sharply once caches are warm: a live run measured ~1.3 s for the ORS
+route call alone on a cold cross-country request, while a repeated request is
+served from the plan cache in a few milliseconds. Every response additionally
+carries the total request time as the `X-Response-Time-Ms` and standard
 `Server-Timing: app;dur=...` headers, and the map page shows the computation
 time in its panel.
 
@@ -389,8 +392,9 @@ Provider settings are read at startup, so restart the app after editing
 | ---- | ----- | --- |
 | Geocoding results (including negative results) | Django cache | `GEOCODE_CACHE_TTL` (default 24 h) |
 | Provider route (full geometry + summary) | Django cache | `ROUTE_CACHE_TTL` (default 1 h) |
-| Simplified route geometry + GeoJSON | Django cache | `ROUTE_CACHE_TTL` |
+| Simplified route geometry + GeoJSON + duration | Django cache | `ROUTE_CACHE_TTL` |
 | Projected candidate stations per route | Django cache | `CANDIDATES_CACHE_TTL` (default 1 h), keyed by a station-data version |
+| Fully computed plan (route + stops + totals) | Django cache | `PLAN_CACHE_TTL` (default 1 h), keyed by coords, tank flag, vehicle settings and the station-data version |
 | Geocoded stations | Database (`FuelStation`) | permanent |
 
 Cache keys are namespaced per provider, so switching providers never serves
@@ -398,11 +402,23 @@ stale results from another one. The station-data version (row count + latest
 `updated_at`, itself cached for 60 s) invalidates the candidate cache
 automatically after imports or price updates.
 
-**Performance:** a cold request is dominated by the provider call (~1.7 s for
-a cross-country ORS route); repeated requests are served from the caches above
-and complete in **~40–60 ms** (simplify + projection + DP skipped), with
-responses gzipped by Django (a 2,790-mile GeoJSON drops from ~150 KB to
-~45 KB).
+**Performance:** a cold request is dominated by the provider call. Measured
+against `api.heigit.org`, a cross-country ORS route took ~1.3 s on a fresh
+connection alone (≈0.36 s TCP+TLS, ≈0.24 s server compute, ≈0.7 s to download
+490 KB). Three things cut that down without changing the result:
+
+* directions use the ORS `/json` endpoint, whose encoded-polyline geometry is
+  ~80 KB instead of ~490 KB (measured 1.34 s → 0.90 s per call; precision 5 is
+  ~1 m, far below the 8 m simplification tolerance);
+* all provider calls share one pooled `requests.Session`, so the TCP/TLS
+  handshake is only paid on the first call of a worker process;
+* start and finish geocoding run concurrently, saving one full round trip on
+  address-based requests.
+
+A repeated request is served from the **plan cache**: simplify, projection and
+the optimiser are skipped entirely (locally measured 36 ms → ~2 ms on the CPU
+path; a Redis round trip adds a few ms). Responses are still gzipped by Django
+(a 2,790-mile GeoJSON drops from ~150 KB to ~45 KB).
 
 The default cache backend is Django's local-memory cache. In production set
 `REDIS_URL` to use Redis (recommended when running multiple gunicorn workers).
@@ -412,7 +428,7 @@ The default cache backend is Django's local-memory cache. In production set
 ## Tests
 
 ```bash
-python manage.py test            # all 46 tests
+python manage.py test            # all 108 tests
 python manage.py test fuel.tests.test_optimizer
 ```
 
@@ -432,7 +448,8 @@ database) and never call the external API.
 ## Docker / Dokploy deployment
 
 The `Dockerfile` builds a production image: Python 3.12-slim, gunicorn on
-port 8000, `entrypoint.sh` waits for Postgres, runs `migrate` and
+port 8000 (threaded `gthread` workers – requests spend most of their time
+waiting on ORS), `entrypoint.sh` waits for Postgres, runs `migrate` and
 `collectstatic`, then starts gunicorn. `/health/` is used as the healthcheck.
 
 ### 1. PostgreSQL – required
@@ -456,10 +473,10 @@ Without `REDIS_URL` the app uses Django's local-memory cache:
   full computation again,
 * the 60 req/min rate limit is enforced per worker rather than globally.
 
-With the Dockerfile's 3 gunicorn workers, adding Redis (create one in Dokploy
-and set `REDIS_URL=redis://...`) makes all caches shared and every repeat
-request fast (~40–60 ms). It is not required for correctness – only for
-consistent performance under multiple workers.
+With the Dockerfile's 3 gunicorn workers (4 threads each), adding Redis
+(create one in Dokploy and set `REDIS_URL=redis://...`) makes all caches
+shared and every repeat request fast (a few ms). It is not required for
+correctness – only for consistent performance under multiple workers.
 
 ### 3. Application
 

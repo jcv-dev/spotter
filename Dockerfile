@@ -24,4 +24,9 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
     CMD curl -fsS http://localhost:8000/health/ || exit 1
 
 ENTRYPOINT ["./entrypoint.sh"]
-CMD ["gunicorn", "fuel_route.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "3", "--timeout", "120"]
+# Web requests are network-bound (ORS geocoding/routing), so threaded workers
+# let a slow upstream call overlap with other requests instead of blocking a
+# whole sync worker.
+CMD ["gunicorn", "fuel_route.wsgi:application", "--bind", "0.0.0.0:8000", \
+     "--worker-class", "gthread", "--workers", "3", "--threads", "4", \
+     "--timeout", "120", "--keep-alive", "5"]

@@ -38,19 +38,46 @@ class RouteArtifactCacheTests(TestCase):
 
         with mock.patch(
             "fuel.services.ors.get_directions", return_value=SHORT_ROUTE
-        ), mock.patch(
+        ) as directions, mock.patch(
             "fuel.services.routing.simplify_polyline", wraps=simplify_polyline
         ) as simplify, mock.patch(
             "fuel.services.routing._load_candidates", wraps=routing._load_candidates
-        ) as load_candidates:
+        ) as load_candidates, mock.patch(
+            "fuel.services.routing.optimize_fuel_stops", wraps=routing.optimize_fuel_stops
+        ) as optimize:
             first = routing.build_route_response(start, finish, True)
             second = routing.build_route_response(start, finish, True)
 
         # The expensive work happens once, the second request is served from cache.
+        self.assertEqual(directions.call_count, 1)
         self.assertEqual(simplify.call_count, 1)
         self.assertEqual(load_candidates.call_count, 1)
+        self.assertEqual(optimize.call_count, 1)
         self.assertEqual(first["route"], second["route"])
         self.assertEqual(first["total_fuel_cost"], second["total_fuel_cost"])
+        # Cached entries must never be mutated by later requests.
+        self.assertIsNot(first, second)
+
+    def test_plan_cache_is_per_full_tank_flag(self):
+        start = {"lat": 34.0, "lon": -118.0}
+        finish = {"lat": 35.0, "lon": -118.0}
+        # Required by the empty-tank start (cheapest station near the start).
+        FuelStation.objects.create(
+            name="Start Fuel", address="1 Main St", city="Town", state="CA",
+            latitude=34.0, longitude=-118.0, price=Decimal("3.000"),
+        )
+
+        with mock.patch(
+            "fuel.services.ors.get_directions", return_value=SHORT_ROUTE
+        ), mock.patch(
+            "fuel.services.routing.optimize_fuel_stops", wraps=routing.optimize_fuel_stops
+        ) as optimize:
+            routing.build_route_response(start, finish, True)
+            routing.build_route_response(start, finish, False)
+            routing.build_route_response(start, finish, True)
+
+        # Full and empty tank are distinct cache entries; the repeat is a hit.
+        self.assertEqual(optimize.call_count, 2)
 
     def test_candidates_cache_refreshes_when_station_data_changes(self):
         start = {"lat": 34.0, "lon": -118.0}

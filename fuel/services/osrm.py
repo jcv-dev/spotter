@@ -16,6 +16,8 @@ from django.conf import settings
 from django.core.cache import cache
 
 from .errors import ProviderRequestError
+from .geo import decode_polyline
+from .http import session
 from .ors import METERS_PER_MILE, DirectionsResult
 
 logger = logging.getLogger("fuel.osrm")
@@ -46,7 +48,7 @@ def _request(url: str, params: dict, retries: int = 3) -> dict:
             logger.warning("Retrying OSRM request in %.0fs (attempt %d/%d)", backoff, attempt + 1, retries + 1)
             time.sleep(backoff)
         try:
-            response = requests.get(
+            response = session.get(
                 url, params=params, headers=headers, timeout=settings.ORS_TIMEOUT_SECONDS
             )
         except requests.RequestException as exc:
@@ -94,13 +96,19 @@ def get_directions(
         f"{start_lon},{start_lat};{finish_lon},{finish_lat}"
     )
     logger.info("Requesting OSRM directions %s -> %s", start, finish)
-    data = _request(url, {"overview": "full", "geometries": "geojson", "steps": "false"})
+    # ``polyline`` (precision 5) keeps the response several times smaller than
+    # GeoJSON with ~1 m accuracy – the same compact format the ORS client uses.
+    data = _request(url, {"overview": "full", "geometries": "polyline", "steps": "false"})
 
     if data.get("code") != "Ok" or not data.get("routes"):
         raise ProviderRequestError(f"OSRM could not find a route: {data.get('code')}")
     route = data["routes"][0]
     try:
-        coordinates = [(float(lat), float(lon)) for lon, lat in route["geometry"]["coordinates"]]
+        geometry = route["geometry"]
+        if isinstance(geometry, str):
+            coordinates = decode_polyline(geometry)
+        else:  # GeoJSON geometry, in case a server ignores ``geometries``.
+            coordinates = [(float(lat), float(lon)) for lon, lat in geometry["coordinates"]]
         result = DirectionsResult(
             coordinates=coordinates,
             distance_miles=float(route["distance"]) / METERS_PER_MILE,

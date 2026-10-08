@@ -34,6 +34,10 @@ env = environ.Env(
     ROUTE_CACHE_TTL=(int, 3600),
     GEOCODE_CACHE_TTL=(int, 86400),
     CANDIDATES_CACHE_TTL=(int, 3600),
+    PLAN_CACHE_TTL=(int, 3600),
+    # Keep database connections alive between requests (important when the
+    # Postgres host is remote/managed); health checks guard stale connections.
+    CONN_MAX_AGE=(int, 60),
     GEOCODE_CITY_MAX_DISTANCE_MILES=(float, 15.0),
     RATE_LIMIT_REQUESTS_PER_MINUTE=(int, 60),
     TANK_CAPACITY_GALLONS=(float, 50.0),
@@ -97,6 +101,8 @@ TEMPLATES = [
 WSGI_APPLICATION = "fuel_route.wsgi.application"
 
 DATABASES = {"default": env.db("DATABASE_URL")}
+DATABASES["default"]["CONN_MAX_AGE"] = env("CONN_MAX_AGE")
+DATABASES["default"]["CONN_HEALTH_CHECKS"] = True
 
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
@@ -172,6 +178,7 @@ ORS_REQUEST_INTERVAL = env("ORS_REQUEST_INTERVAL")
 ROUTE_CACHE_TTL = env("ROUTE_CACHE_TTL")
 GEOCODE_CACHE_TTL = env("GEOCODE_CACHE_TTL")
 CANDIDATES_CACHE_TTL = env("CANDIDATES_CACHE_TTL")
+PLAN_CACHE_TTL = env("PLAN_CACHE_TTL")
 GEOCODE_CITY_MAX_DISTANCE_MILES = env("GEOCODE_CITY_MAX_DISTANCE_MILES")
 RATE_LIMIT_REQUESTS_PER_MINUTE = env("RATE_LIMIT_REQUESTS_PER_MINUTE")
 
